@@ -6,7 +6,7 @@ templ LoginPage(botLink string) {
 		@head("Вход")
 		<body class="login">
 			<div class="login-card">
-				<h1>Uslugi · админка</h1>
+				@brand("админка")
 				if botLink == "" {
 					<p class="error">Не задан username бота: укажи BOT_USERNAME в .env и перезапусти веб-сервер.</p>
 				} else {

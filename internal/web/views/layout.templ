@@ -5,6 +5,7 @@ templ head(title string) {
 		<meta charset="utf-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
 		<title>{ title } · Uslugi</title>
+		<link rel="preload" href="/static/fonts/manrope.woff2" as="font" type="font/woff2" crossorigin/>
 		<link rel="stylesheet" href="/static/app.css"/>
 		<script src="/static/htmx.min.js" defer></script>
 		<script src="/static/app.js" defer></script>
@@ -17,7 +18,7 @@ templ Layout(p Page) {
 		@head(p.Title)
 		<body hx-boost="true">
 			<header class="topbar">
-				<a class="brand" href="/leads">Uslugi · CRM</a>
+				@brand("CRM")
 				<nav>
 					<a href="/leads" class={ templ.KV("active", p.Nav == "list") }>Лиды</a>
 					<a href="/leads/board" class={ templ.KV("active", p.Nav == "board") }>Канбан</a>
@@ -35,4 +36,13 @@ templ Layout(p Page) {
 			</main>
 		</body>
 	</html>
+}
+
+templ brand(sub string) {
+	<a class="brand" href="/leads">
+		<span>Uslugi<span class="dot">.</span></span>
+		if sub != "" {
+			<span class="sub">{ sub }</span>
+		}
+	</a>
 }

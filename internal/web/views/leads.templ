@@ -12,7 +12,7 @@ templ LeadsPage(d LeadsData) {
 			if len(d.Leads) == 0 {
 				<p class="empty">Лидов нет. <a href="/leads/new">Добавить первого</a></p>
 			} else {
-				<p class="muted">{ countLabel(len(d.Leads)) } шт.</p>
+				<p class="muted count-line">{ countLabel(len(d.Leads)) } шт.</p>
 				<table class="leads">
 					<thead>
 						<tr>

@@ -184,15 +184,6 @@ templ leadSide(d LeadData) {
 			if d.Lead.Status == store.LeadDoNotContact {
 				<p class="flash flash-error">Контакт просил не беспокоить: исходящие сообщения запрещены.</p>
 			}
-			<form class="touch-form" method="post" action={ templ.SafeURL(leadAction(d.Lead.ID, "touches")) }
-				hx-post={ leadAction(d.Lead.ID, "touches") } hx-target="#main" hx-select="#main" hx-swap="outerHTML">
-				<p class="hint">Пишешь исполнителю из Telegram — отметь здесь, что и когда отправил или получил.</p>
-				<textarea name="text" rows="3" placeholder="Текст сообщения"></textarea>
-				<div class="row">
-					<button type="submit" name="direction" value="outgoing" class="button" disabled?={ d.Lead.Status == store.LeadDoNotContact }>→ Отправил</button>
-					<button type="submit" name="direction" value="incoming" class="button secondary">← Получил ответ</button>
-				</div>
-			</form>
 			if len(d.Touches) == 0 {
 				<p class="muted">Касаний пока нет.</p>
 			} else {
@@ -217,6 +208,15 @@ templ leadSide(d LeadData) {
 					}
 				</ol>
 			}
+			<form class="touch-form" method="post" action={ templ.SafeURL(leadAction(d.Lead.ID, "touches")) }
+				hx-post={ leadAction(d.Lead.ID, "touches") } hx-target="#main" hx-select="#main" hx-swap="outerHTML">
+				<p class="hint">Пишешь исполнителю из Telegram — отметь здесь, что и когда отправил или получил.</p>
+				<textarea name="text" rows="3" placeholder="Текст сообщения"></textarea>
+				<div class="row">
+					<button type="submit" name="direction" value="outgoing" class="button" disabled?={ d.Lead.Status == store.LeadDoNotContact }>→ Отправил</button>
+					<button type="submit" name="direction" value="incoming" class="button secondary">← Получил ответ</button>
+				</div>
+			</form>
 		</section>
 	</aside>
 }

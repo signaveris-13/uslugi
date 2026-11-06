@@ -343,7 +343,7 @@ func (s *Store) ListTouches(ctx context.Context, leadID int64) ([]Touch, error) 
 	rows, _ := s.pool.Query(ctx, `
 		SELECT m.id, m.direction, m.text, tm.name AS author_name, m.sent_at
 		FROM lead_message m LEFT JOIN team_member tm ON tm.id = m.author_id
-		WHERE m.lead_id = $1 ORDER BY m.sent_at DESC, m.id DESC`, leadID)
+		WHERE m.lead_id = $1 ORDER BY m.sent_at, m.id`, leadID)
 	return collectAll[Touch](rows)
 }
 
