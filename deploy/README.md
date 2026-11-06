@@ -1,0 +1,69 @@
+# Деплой на VPS
+
+Всё работает в Docker Compose на одном сервере:
+
+| Сервис   | Что делает |
+|----------|------------|
+| postgres | база, наружу не открыта |
+| migrate  | применяет миграции при каждом запуске и завершается |
+| bot      | Telegram-бот (long polling) |
+| web      | админка с CRM |
+| worker   | фоновые задачи |
+| caddy    | HTTPS: сам выпускает и продлевает сертификат Let's Encrypt |
+| backup   | раз в сутки дамп базы в `deploy/backups/`, хранится 30 дней |
+
+Нужен сервер на Ubuntu или Debian с открытыми портами 22, 80 и 443.
+
+## Первая установка
+
+Всё — на сервере, от root.
+
+1. Ключ, чтобы сервер мог читать приватный репозиторий:
+
+   ```sh
+   ssh-keygen -t ed25519 -N "" -f ~/.ssh/uslugi_deploy && cat ~/.ssh/uslugi_deploy.pub
+   ```
+
+   Добавь напечатанный ключ в репозиторий: Settings → Deploy keys → Add deploy key, без права записи.
+
+2. Склонируй репозиторий:
+
+   ```sh
+   apt-get update && apt-get install -y git curl
+   ```
+   ```sh
+   GIT_SSH_COMMAND="ssh -i ~/.ssh/uslugi_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" git clone git@github.com:signaveris-13/uslugi.git /opt/uslugi
+   ```
+   ```sh
+   git -C /opt/uslugi config core.sshCommand "ssh -i ~/.ssh/uslugi_deploy -o IdentitiesOnly=yes"
+   ```
+
+3. Запусти установку:
+
+   ```sh
+   cd /opt/uslugi && bash deploy/install.sh
+   ```
+
+   Скрипт поставит Docker, откроет порты, спросит адрес, токен бота и Telegram ID команды, сохранит их в `deploy/.env` и запустит всё.
+   Без своего домена адрес будет `<IP через дефисы>.sslip.io` — это настоящий HTTPS.
+
+Один токен бота не может работать в двух местах сразу: пока бот запущен на сервере, локальный `make run-bot` останови.
+
+## Обновление
+
+```sh
+cd /opt/uslugi && bash deploy/update.sh
+```
+
+## Полезное
+
+```sh
+cd /opt/uslugi
+docker compose -f deploy/compose.yml ps
+docker compose -f deploy/compose.yml logs -f web bot
+docker compose -f deploy/compose.yml restart bot
+```
+
+Свой домен: добавь A-запись на IP сервера, поменяй `DOMAIN` в `deploy/.env` и выполни `bash deploy/update.sh`.
+
+Бэкапы лежат на том же сервере. Пока это защита от ошибок в данных, но не от потери сервера: копию в другое место настроим перед запуском.

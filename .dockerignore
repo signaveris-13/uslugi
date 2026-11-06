@@ -1,0 +1,13 @@
+.git
+.github
+.env
+*.env.local
+*.session
+*.session-journal
+media/
+deploy/.env
+deploy/backups/
+go.work
+go.work.sum
+bin/
+dist/

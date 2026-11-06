@@ -23,3 +23,7 @@ go.work.sum
 .idea/
 .vscode/
 .DS_Store
+
+# Прод-настройки и бэкапы на сервере
+deploy/.env
+deploy/backups/
