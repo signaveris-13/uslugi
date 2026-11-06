@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: uslugi
+          POSTGRES_PASSWORD: uslugi
+          POSTGRES_DB: uslugi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U uslugi -d uslugi"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+
+    env:
+      DATABASE_URL: postgres://uslugi:uslugi@localhost:5432/uslugi?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Первый go.sum собран в песочнице без доступа к golang.org,
+      # поэтому пока дописываем его здесь. После `make tidy` локально
+      # и коммита go.sum заменить на проверку `git diff --exit-code`.
+      - name: Зависимости
+        run: go mod tidy
+
+      - name: Сборка
+        run: go build ./...
+
+      - name: Анализ
+        run: go vet ./...
+
+      - name: Тесты
+        run: go test ./...
+
+      - name: Миграции применяются и откатываются
+        run: |
+          go run ./cmd/migrate up
+          go run ./cmd/migrate down
+          go run ./cmd/migrate up

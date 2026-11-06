@@ -1,0 +1,25 @@
+# Секреты
+.env
+*.env.local
+
+# Сессии Telegram-аккаунтов (MTProto) — никогда не коммитить
+*.session
+*.session-journal
+
+# Загруженные фото и медиа
+media/
+
+# Сборка
+/bin/
+/dist/
+*.test
+*.out
+
+# Локальный workspace Go
+go.work
+go.work.sum
+
+# Редакторы и ОС
+.idea/
+.vscode/
+.DS_Store
