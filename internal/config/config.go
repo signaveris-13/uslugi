@@ -17,10 +17,15 @@ type Config struct {
 	DatabaseURL string
 	// BotToken — токен Telegram-бота от BotFather.
 	BotToken string
+	// BotUsername — username бота без @, для ссылок t.me/<bot>?start=…
+	// Если пусто, веб-сервер узнаёт его у Telegram при старте.
+	BotUsername string
 	// HTTPAddr — адрес, на котором слушает веб-сервер (админка и каталог).
 	HTTPAddr string
 	// TeamTelegramIDs — Telegram ID команды, которых пускаем в админку.
 	TeamTelegramIDs []int64
+	// AdminTimezone — в каком часовом поясе админка показывает время.
+	AdminTimezone string
 }
 
 func Load() (Config, error) {
@@ -28,7 +33,10 @@ func Load() (Config, error) {
 		Env:         getenv("APP_ENV", "local"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		BotToken:    os.Getenv("BOT_TOKEN"),
+		BotUsername: strings.TrimPrefix(os.Getenv("BOT_USERNAME"), "@"),
 		HTTPAddr:    getenv("HTTP_ADDR", ":8080"),
+		// По умолчанию — время рынка запуска (Нячанг).
+		AdminTimezone: getenv("ADMIN_TIMEZONE", "Asia/Ho_Chi_Minh"),
 	}
 
 	ids, err := parseIDs(os.Getenv("TEAM_TELEGRAM_IDS"))
@@ -38,6 +46,11 @@ func Load() (Config, error) {
 	cfg.TeamTelegramIDs = ids
 
 	return cfg, nil
+}
+
+// IsLocal — запуск на машине разработчика: cookie без Secure, подробные ошибки.
+func (c Config) IsLocal() bool {
+	return c.Env == "local"
 }
 
 // RequireDB проверяет, что задана строка подключения к базе.

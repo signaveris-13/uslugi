@@ -1,0 +1,222 @@
+package views
+
+import "github.com/signaveris-13/uslugi/internal/store"
+
+templ LeadPage(d LeadData) {
+	@Layout(d.Page) {
+		<div class="page-head">
+			<h1>
+				if d.IsNew {
+					Новый лид
+				} else {
+					{ d.Lead.DisplayName() }
+					<span class={ statusClass(d.Lead.Status) }>{ statusLabel(d.Lead.Status) }</span>
+				}
+			</h1>
+			if !d.IsNew {
+				<p class="muted">
+					{ sourceLabel(d.Lead.Source) } · создан { formatTime(d.Lead.CreatedAt, d.TZ) }
+				</p>
+			}
+		</div>
+		if d.Error != "" {
+			<p class="flash flash-error">{ d.Error }</p>
+		}
+		if d.Notice != "" {
+			<p class="flash">{ d.Notice }</p>
+		}
+		<div class={ "lead-layout", templ.KV("single", d.IsNew) }>
+			@leadForm(d)
+			if !d.IsNew {
+				@leadSide(d)
+			}
+		</div>
+	}
+}
+
+templ leadForm(d LeadData) {
+	<form class="lead-form" method="post"
+		if d.IsNew {
+			action="/leads"
+		} else {
+			action={ templ.SafeURL("/leads/" + id(d.Lead.ID)) }
+		}>
+		<fieldset>
+			<legend>Исполнитель</legend>
+			<label>Имя или название <input name="name" value={ d.Form.Name } maxlength="120"/></label>
+			<div class="row">
+				<label>
+					Категория
+					<select name="category_id">
+						<option value="">—</option>
+						for _, g := range d.Groups {
+							<optgroup label={ g.Emoji + " " + g.Name }>
+								for _, c := range g.Items {
+									<option value={ id(c.ID) } selected?={ d.Form.CategoryID == c.ID }>{ c.Name }</option>
+								}
+							</optgroup>
+						}
+					</select>
+				</label>
+				<label>
+					Город
+					<select name="city_id">
+						<option value="">—</option>
+						for _, c := range d.Cities {
+							<option value={ id(c.ID) } selected?={ d.Form.CityID == c.ID }>{ c.Name }</option>
+						}
+					</select>
+				</label>
+			</div>
+			<label>Кратко об услугах <textarea name="summary" rows="2">{ d.Form.Summary }</textarea></label>
+		</fieldset>
+		<fieldset>
+			<legend>Контакты</legend>
+			<p class="hint">Нужно хотя бы одно: имя, username или телефон.</p>
+			<div class="row">
+				<label>Telegram <input name="telegram_username" value={ d.Form.TelegramUsername } placeholder="@username или t.me/…"/></label>
+				<label>Телефон <input name="phone" value={ d.Form.Phone } placeholder="+84…"/></label>
+			</div>
+			<div class="row">
+				<label>WhatsApp <input name="whatsapp" value={ d.Form.WhatsApp }/></label>
+				<label>Instagram <input name="instagram" value={ d.Form.Instagram }/></label>
+			</div>
+		</fieldset>
+		<fieldset>
+			<legend>Откуда</legend>
+			<div class="row">
+				<label>
+					Источник
+					<select name="source">
+						for _, s := range sources() {
+							<option value={ s } selected?={ d.Form.Source == s }>{ sourceLabel(s) }</option>
+						}
+					</select>
+				</label>
+				<label>Ссылка на пост или профиль <input name="source_url" value={ d.Form.SourceURL } placeholder="https://t.me/…"/></label>
+			</div>
+			<label>Текст поста <textarea name="source_text" rows="3">{ d.Form.SourceText }</textarea></label>
+		</fieldset>
+		<fieldset>
+			<legend>Для команды</legend>
+			<label>Заметки <textarea name="notes" rows="3">{ d.Form.Notes }</textarea></label>
+			<label>Теги через запятую <input name="tags" value={ joinTags(d.Form.Tags) }/></label>
+			if d.IsNew {
+				<label>
+					Статус
+					<select name="status">
+						for _, s := range statuses() {
+							<option value={ s } selected?={ d.Form.Status == s }>{ statusLabel(s) }</option>
+						}
+					</select>
+				</label>
+			}
+		</fieldset>
+		<div class="actions">
+			<button type="submit" class="button">
+				if d.IsNew {
+					Создать лид
+				} else {
+					Сохранить
+				}
+			</button>
+		</div>
+	</form>
+}
+
+templ leadSide(d LeadData) {
+	<aside class="lead-side">
+		<section class="panel">
+			<h2>Воронка</h2>
+			<form method="post" action={ templ.SafeURL(leadAction(d.Lead.ID, "status")) }
+				hx-post={ leadAction(d.Lead.ID, "status") } hx-trigger="change" hx-target="#main" hx-select="#main" hx-swap="outerHTML">
+				<label>
+					Статус
+					<select name="status">
+						for _, s := range statuses() {
+							<option value={ s } selected?={ d.Lead.Status == s }>{ statusLabel(s) }</option>
+						}
+					</select>
+				</label>
+				<noscript><button type="submit">OK</button></noscript>
+			</form>
+			<form method="post" action={ templ.SafeURL(leadAction(d.Lead.ID, "assignee")) }
+				hx-post={ leadAction(d.Lead.ID, "assignee") } hx-trigger="change" hx-target="#main" hx-select="#main" hx-swap="outerHTML">
+				<label>
+					Ответственный
+					<select name="assignee_id">
+						<option value="">—</option>
+						for _, m := range d.Team {
+							<option value={ id(m.ID) } selected?={ d.Lead.AssigneeID != nil && *d.Lead.AssigneeID == m.ID }>{ m.Name }</option>
+						}
+					</select>
+				</label>
+				<noscript><button type="submit">OK</button></noscript>
+			</form>
+		</section>
+		<section class="panel">
+			<h2>Приглашение</h2>
+			if d.InviteURL != "" {
+				<p class="hint">Отправь эту ссылку исполнителю. По ней он откроет бота и заведёт объявление, а лид свяжется с ним сам.</p>
+				<div class="copy">
+					<input id="invite-url" readonly value={ d.InviteURL }/>
+					<button type="button" class="button" data-copy="#invite-url">Копировать</button>
+				</div>
+			} else {
+				<form method="post" action={ templ.SafeURL(leadAction(d.Lead.ID, "invite")) }
+					hx-post={ leadAction(d.Lead.ID, "invite") } hx-target="#main" hx-select="#main" hx-swap="outerHTML">
+					<button type="submit" class="button">Создать ссылку-приглашение</button>
+				</form>
+			}
+		</section>
+		if len(d.Duplicates) > 0 {
+			<section class="panel panel-warn">
+				<h2>Возможные дубли</h2>
+				<ul>
+					for _, l := range d.Duplicates {
+						<li><a href={ leadURL(l.ID) }>{ l.DisplayName() }</a> <span class={ statusClass(l.Status) }>{ statusLabel(l.Status) }</span></li>
+					}
+				</ul>
+			</section>
+		}
+		<section class="panel">
+			<h2>Касания</h2>
+			if d.Lead.Status == store.LeadDoNotContact {
+				<p class="flash flash-error">Контакт просил не беспокоить: исходящие сообщения запрещены.</p>
+			}
+			<form class="touch-form" method="post" action={ templ.SafeURL(leadAction(d.Lead.ID, "touches")) }
+				hx-post={ leadAction(d.Lead.ID, "touches") } hx-target="#main" hx-select="#main" hx-swap="outerHTML">
+				<p class="hint">Пишешь исполнителю из Telegram — отметь здесь, что и когда отправил или получил.</p>
+				<textarea name="text" rows="3" placeholder="Текст сообщения"></textarea>
+				<div class="row">
+					<button type="submit" name="direction" value="outgoing" class="button" disabled?={ d.Lead.Status == store.LeadDoNotContact }>→ Отправил</button>
+					<button type="submit" name="direction" value="incoming" class="button secondary">← Получил ответ</button>
+				</div>
+			</form>
+			if len(d.Touches) == 0 {
+				<p class="muted">Касаний пока нет.</p>
+			} else {
+				<ol class="touches">
+					for _, t := range d.Touches {
+						<li class={ "touch", "touch-" + t.Direction }>
+							<div class="touch-meta">
+								if t.Direction == "outgoing" {
+									→ отправлено
+								} else {
+									← получено
+								}
+								{ " · " + formatTime(t.SentAt, d.TZ) }
+								if t.AuthorName != nil {
+									{ " · " + *t.AuthorName }
+								}
+							</div>
+							if t.Text != nil {
+								<div class="touch-text">{ *t.Text }</div>
+							}
+						</li>
+					}
+				</ol>
+			}
+		</section>
+	</aside>
+}

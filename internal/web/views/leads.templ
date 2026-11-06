@@ -1,0 +1,94 @@
+package views
+
+import "github.com/signaveris-13/uslugi/internal/store"
+
+templ LeadsPage(d LeadsData) {
+	@Layout(d.Page) {
+		<div class="page-head">
+			<h1>Лиды</h1>
+		</div>
+		@filters("/leads", d.Filter, d.Refs, true)
+		<div id="results">
+			if len(d.Leads) == 0 {
+				<p class="empty">Лидов нет. <a href="/leads/new">Добавить первого</a></p>
+			} else {
+				<p class="muted">{ countLabel(len(d.Leads)) } шт.</p>
+				<table class="leads">
+					<thead>
+						<tr>
+							<th>Лид</th>
+							<th>Категория</th>
+							<th>Город</th>
+							<th>Контакты</th>
+							<th>Статус</th>
+							<th>Ответственный</th>
+							<th>Обновлён</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, l := range d.Leads {
+							@leadRow(l, d.Page)
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+templ leadRow(l store.Lead, p Page) {
+	<tr>
+		<td><a href={ leadURL(l.ID) }>{ l.DisplayName() }</a></td>
+		<td>{ deref(l.CategoryName) }</td>
+		<td>{ deref(l.CityName) }</td>
+		<td class="contacts">
+			if l.TelegramUsername != nil {
+				<a href={ telegramURL(*l.TelegramUsername) } target="_blank" rel="noopener">{ "@" + *l.TelegramUsername }</a>
+			}
+			if l.Phone != nil {
+				<span>{ *l.Phone }</span>
+			}
+		</td>
+		<td><span class={ statusClass(l.Status) }>{ statusLabel(l.Status) }</span></td>
+		<td>{ deref(l.AssigneeName) }</td>
+		<td class="muted">{ formatTime(l.UpdatedAt, p.TZ) }</td>
+	</tr>
+}
+
+templ BoardPage(d BoardData) {
+	@Layout(d.Page) {
+		<div class="page-head">
+			<h1>Канбан</h1>
+		</div>
+		@filters("/leads/board", d.Filter, d.Refs, false)
+		<div id="results" class="board">
+			for _, col := range d.Columns {
+				<section class="column">
+					<h2>{ statusLabel(col.Status) } <span class="count">{ countLabel(len(col.Leads)) }</span></h2>
+					for _, l := range col.Leads {
+						<article class="card">
+							<a class="card-title" href={ leadURL(l.ID) }>{ l.DisplayName() }</a>
+							<div class="muted">
+								{ deref(l.CategoryName) }
+								if l.CityName != nil {
+									{ " · " + *l.CityName }
+								}
+							</div>
+							<form method="post" action={ templ.SafeURL(leadAction(l.ID, "status")) }
+								hx-post={ leadAction(l.ID, "status") } hx-trigger="change"
+								hx-target="#results" hx-select="#results" hx-swap="outerHTML">
+								<input type="hidden" name="back" value={ d.Back }/>
+								<select name="status" aria-label="Статус">
+									for _, s := range statuses() {
+										<option value={ s } selected?={ l.Status == s }>{ statusLabel(s) }</option>
+									}
+								</select>
+								<noscript><button type="submit">OK</button></noscript>
+							</form>
+						</article>
+					}
+				</section>
+			}
+		</div>
+	}
+}

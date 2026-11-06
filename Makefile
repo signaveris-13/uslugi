@@ -4,7 +4,7 @@ include .env
 export
 endif
 
-.PHONY: help up down migrate migrate-down migrate-status run-bot run-web run-worker test vet tidy
+.PHONY: help up down migrate migrate-down migrate-status run-bot run-web run-worker test vet tidy generate
 
 help: ## Показать команды
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-15s %s\n", $$1, $$2}'
@@ -41,3 +41,8 @@ vet: ## Статический анализ
 
 tidy: ## Обновить go.mod и go.sum
 	go mod tidy
+
+TEMPL_VERSION := v0.3.1001
+
+generate: ## Сгенерировать Go-код из шаблонов *.templ
+	go run github.com/a-h/templ/cmd/templ@$(TEMPL_VERSION) generate

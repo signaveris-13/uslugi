@@ -34,11 +34,21 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # Первый go.sum собран в песочнице без доступа к golang.org,
-      # поэтому пока дописываем его здесь. После `make tidy` локально
-      # и коммита go.sum заменить на проверку `git diff --exit-code`.
+      # Первый go.sum собран в песочнице без доступа к golang.org, поэтому
+      # пока дописываем его здесь и выкладываем артефактом, чтобы закоммитить.
+      # После этого заменить на проверку `git diff --exit-code go.mod go.sum`.
       - name: Зависимости
         run: go mod tidy
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-sum
+          path: go.sum
+
+      - name: Шаблоны templ сгенерированы
+        run: |
+          make generate
+          git diff --exit-code -- '*_templ.go'
 
       - name: Сборка
         run: go build ./...
@@ -46,11 +56,11 @@ jobs:
       - name: Анализ
         run: go vet ./...
 
-      - name: Тесты
-        run: go test ./...
-
       - name: Миграции применяются и откатываются
         run: |
           go run ./cmd/migrate up
           go run ./cmd/migrate down
           go run ./cmd/migrate up
+
+      - name: Тесты (на Postgres)
+        run: go test ./...

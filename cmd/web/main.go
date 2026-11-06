@@ -1,5 +1,4 @@
-// Команда web — HTTP-сервер: админка с CRM и веб-каталог (templ + htmx).
-// Пока отдаёт только /healthz.
+// Команда web — HTTP-сервер: админка с CRM, позже веб-каталог (templ + htmx).
 package main
 
 import (
@@ -11,11 +10,14 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // часовые пояса внутри бинаря, не зависим от системы
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/go-telegram/bot"
 
 	"github.com/signaveris-13/uslugi/internal/config"
 	"github.com/signaveris-13/uslugi/internal/db"
+	"github.com/signaveris-13/uslugi/internal/store"
+	"github.com/signaveris-13/uslugi/internal/web"
 )
 
 func main() {
@@ -40,9 +42,33 @@ func main() {
 	}
 	defer pool.Close()
 
+	st := store.New(pool)
+	if err := st.BootstrapTeam(ctx, cfg.TeamTelegramIDs); err != nil {
+		log.Error("команда", "err", err)
+		os.Exit(1)
+	}
+
+	botUsername := cfg.BotUsername
+	if botUsername == "" && cfg.BotToken != "" {
+		botUsername = fetchBotUsername(ctx, cfg.BotToken, log)
+	}
+	if botUsername == "" {
+		log.Warn("username бота неизвестен: вход в админку не заработает. Задай BOT_USERNAME в .env")
+	}
+
+	tz, err := time.LoadLocation(cfg.AdminTimezone)
+	if err != nil {
+		log.Error("часовой пояс", "err", err, "tz", cfg.AdminTimezone)
+		os.Exit(1)
+	}
+
 	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           routes(pool),
+		Addr: cfg.HTTPAddr,
+		Handler: web.New(st, log, web.Options{
+			BotUsername:  botUsername,
+			SecureCookie: !cfg.IsLocal(),
+			TimeZone:     tz,
+		}).Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -53,7 +79,7 @@ func main() {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("веб-сервер запущен", "addr", cfg.HTTPAddr)
+	log.Info("веб-сервер запущен", "addr", cfg.HTTPAddr, "admin", "http://localhost"+cfg.HTTPAddr+"/login")
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("веб-сервер", "err", err)
 		os.Exit(1)
@@ -61,16 +87,19 @@ func main() {
 	log.Info("веб-сервер остановлен")
 }
 
-func routes(pool *pgxpool.Pool) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-		if err := pool.Ping(ctx); err != nil {
-			http.Error(w, "db down", http.StatusServiceUnavailable)
-			return
-		}
-		_, _ = w.Write([]byte("ok"))
-	})
-	return mux
+// fetchBotUsername спрашивает у Telegram username бота по токену.
+func fetchBotUsername(ctx context.Context, token string, log *slog.Logger) string {
+	b, err := bot.New(token, bot.WithSkipGetMe())
+	if err != nil {
+		log.Warn("бот", "err", err)
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	me, err := b.GetMe(ctx)
+	if err != nil {
+		log.Warn("не удалось узнать username бота у Telegram", "err", err)
+		return ""
+	}
+	return me.Username
 }

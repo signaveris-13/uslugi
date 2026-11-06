@@ -1,0 +1,50 @@
+package views
+
+import "github.com/signaveris-13/uslugi/internal/store"
+
+// filters — фильтры лидов. На доске статус не фильтруется: он и есть колонки.
+templ filters(action string, f store.LeadFilter, refs Refs, withStatus bool) {
+	<form class="filters" method="get" action={ templ.SafeURL(action) }
+		hx-get={ action } hx-target="#results" hx-select="#results" hx-swap="outerHTML" hx-push-url="true"
+		hx-trigger="change, input changed delay:300ms from:input[name=q]">
+		<input type="search" name="q" value={ f.Query } placeholder="Имя, username, телефон…"/>
+		if withStatus {
+			<select name="status">
+				<option value="">Все статусы</option>
+				for _, s := range statuses() {
+					<option value={ s } selected?={ f.Status == s }>{ statusLabel(s) }</option>
+				}
+			</select>
+		}
+		<select name="city">
+			<option value="">Все города</option>
+			for _, c := range refs.Cities {
+				<option value={ id(c.ID) } selected?={ f.CityID == c.ID }>{ c.Name }</option>
+			}
+		</select>
+		<select name="category">
+			<option value="">Все категории</option>
+			for _, g := range refs.Groups {
+				<optgroup label={ g.Emoji + " " + g.Name }>
+					for _, c := range g.Items {
+						<option value={ id(c.ID) } selected?={ f.CategoryID == c.ID }>{ c.Name }</option>
+					}
+				</optgroup>
+			}
+		</select>
+		<select name="source">
+			<option value="">Все источники</option>
+			for _, s := range sources() {
+				<option value={ s } selected?={ f.Source == s }>{ sourceLabel(s) }</option>
+			}
+		</select>
+		<select name="assignee">
+			<option value="">Все ответственные</option>
+			<option value="-1" selected?={ f.AssigneeID == -1 }>Без ответственного</option>
+			for _, m := range refs.Team {
+				<option value={ id(m.ID) } selected?={ f.AssigneeID == m.ID }>{ m.Name }</option>
+			}
+		</select>
+		<noscript><button type="submit">Найти</button></noscript>
+	</form>
+}

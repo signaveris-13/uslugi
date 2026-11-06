@@ -1,0 +1,38 @@
+package views
+
+templ head(title string) {
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<title>{ title } · Uslugi</title>
+		<link rel="stylesheet" href="/static/app.css"/>
+		<script src="/static/htmx.min.js" defer></script>
+		<script src="/static/app.js" defer></script>
+	</head>
+}
+
+templ Layout(p Page) {
+	<!DOCTYPE html>
+	<html lang="ru">
+		@head(p.Title)
+		<body hx-boost="true">
+			<header class="topbar">
+				<a class="brand" href="/leads">Uslugi · CRM</a>
+				<nav>
+					<a href="/leads" class={ templ.KV("active", p.Nav == "list") }>Лиды</a>
+					<a href="/leads/board" class={ templ.KV("active", p.Nav == "board") }>Канбан</a>
+					<a href="/leads/new" class={ "button", templ.KV("active", p.Nav == "new") }>+ Новый лид</a>
+				</nav>
+				<div class="me">
+					<span>{ p.Me.Name }</span>
+					<form method="post" action="/logout" hx-boost="false">
+						<button type="submit" class="link">Выйти</button>
+					</form>
+				</div>
+			</header>
+			<main id="main">
+				{ children... }
+			</main>
+		</body>
+	</html>
+}

@@ -1,0 +1,35 @@
+package views
+
+templ LoginPage(botLink string) {
+	<!DOCTYPE html>
+	<html lang="ru">
+		@head("Вход")
+		<body class="login">
+			<div class="login-card">
+				<h1>Uslugi · админка</h1>
+				if botLink == "" {
+					<p class="error">Не задан username бота: укажи BOT_USERNAME в .env и перезапусти веб-сервер.</p>
+				} else {
+					<p>Вход через Telegram: бот спросит подтверждение, и эта страница откроется сама.</p>
+					<a class="button big" href={ templ.SafeURL(botLink) } target="_blank" rel="noopener">Войти через Telegram</a>
+					<div id="login-status" hx-get="/login/status" hx-trigger="every 2s" hx-swap="outerHTML">
+						<p class="muted">Ждём подтверждения в боте…</p>
+					</div>
+				}
+			</div>
+		</body>
+	</html>
+}
+
+templ LoginExpired() {
+	<div id="login-status">
+		<p class="error">Ссылка для входа устарела.</p>
+		<a class="button" href="/login">Получить новую</a>
+	</div>
+}
+
+templ LoginPending() {
+	<div id="login-status" hx-get="/login/status" hx-trigger="every 2s" hx-swap="outerHTML">
+		<p class="muted">Ждём подтверждения в боте…</p>
+	</div>
+}
