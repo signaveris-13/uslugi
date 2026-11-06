@@ -35,15 +35,14 @@ jobs:
           go-version-file: go.mod
 
       # Первый go.sum собран в песочнице без доступа к golang.org, поэтому
-      # пока дописываем его здесь и выкладываем артефактом, чтобы закоммитить.
+      # пока дописываем его здесь и печатаем в лог, чтобы закоммитить.
       # После этого заменить на проверку `git diff --exit-code go.mod go.sum`.
       - name: Зависимости
-        run: go mod tidy
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: go-sum
-          path: go.sum
+        run: |
+          go mod tidy
+          echo "=== GO.SUM BEGIN ==="
+          cat go.sum
+          echo "=== GO.SUM END ==="
 
       - name: Шаблоны templ сгенерированы
         run: |
