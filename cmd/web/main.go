@@ -12,11 +12,10 @@ import (
 	"time"
 	_ "time/tzdata" // часовые пояса внутри бинаря, не зависим от системы
 
-	"github.com/go-telegram/bot"
-
 	"github.com/signaveris-13/uslugi/internal/config"
 	"github.com/signaveris-13/uslugi/internal/db"
 	"github.com/signaveris-13/uslugi/internal/store"
+	"github.com/signaveris-13/uslugi/internal/tgclient"
 	"github.com/signaveris-13/uslugi/internal/web"
 )
 
@@ -48,9 +47,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Telegram нужен для уведомлений исполнителям, фото объявлений и ссылки входа.
+	var tg web.Telegram
 	botUsername := cfg.BotUsername
-	if botUsername == "" && cfg.BotToken != "" {
-		botUsername = fetchBotUsername(ctx, cfg.BotToken, log)
+	if cfg.BotToken != "" {
+		client, err := tgclient.New(cfg.BotToken)
+		if err != nil {
+			log.Error("клиент Telegram", "err", err)
+			os.Exit(1)
+		}
+		tg = client
+		if botUsername == "" {
+			if botUsername, err = client.Username(ctx); err != nil {
+				log.Warn("не удалось узнать username бота у Telegram", "err", err)
+			}
+		}
+	} else {
+		log.Warn("BOT_TOKEN не задан: уведомления исполнителям и фото объявлений не работают")
 	}
 	if botUsername == "" {
 		log.Warn("username бота неизвестен: вход в админку не заработает. Задай BOT_USERNAME в .env")
@@ -65,6 +78,7 @@ func main() {
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: web.New(st, log, web.Options{
+			Telegram:     tg,
 			BotUsername:  botUsername,
 			SecureCookie: !cfg.IsLocal(),
 			TimeZone:     tz,
@@ -85,21 +99,4 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("веб-сервер остановлен")
-}
-
-// fetchBotUsername спрашивает у Telegram username бота по токену.
-func fetchBotUsername(ctx context.Context, token string, log *slog.Logger) string {
-	b, err := bot.New(token, bot.WithSkipGetMe())
-	if err != nil {
-		log.Warn("бот", "err", err)
-		return ""
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	me, err := b.GetMe(ctx)
-	if err != nil {
-		log.Warn("не удалось узнать username бота у Telegram", "err", err)
-		return ""
-	}
-	return me.Username
 }

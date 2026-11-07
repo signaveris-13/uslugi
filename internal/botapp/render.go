@@ -3,7 +3,6 @@ package botapp
 import (
 	"fmt"
 	"html"
-	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -464,49 +463,9 @@ func cardText(l store.Listing) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func priceText(l store.Listing) string {
-	if l.PriceType == nil {
-		return ""
-	}
-	if *l.PriceType == "negotiable" {
-		return "по договорённости"
-	}
-	if l.PriceAmount == nil {
-		return ""
-	}
-	s := formatAmount(*l.PriceAmount, deref(l.Currency))
-	if *l.PriceType == "from" {
-		return "от " + s
-	}
-	return s
-}
+func priceText(l store.Listing) string { return l.PriceText() }
 
-// formatAmount: 450000 VND → «450 000 ₫», 25 USD → «$25».
-func formatAmount(v float64, currency string) string {
-	if currency == "USD" {
-		if v == math.Trunc(v) {
-			return "$" + groupThousands(int64(v))
-		}
-		return "$" + strconv.FormatFloat(v, 'f', 2, 64)
-	}
-	s := groupThousands(int64(math.Round(v)))
-	if currency == "VND" || currency == "" {
-		return s + " ₫"
-	}
-	return s + " " + currency
-}
-
-func groupThousands(n int64) string {
-	s := strconv.FormatInt(n, 10)
-	var out []byte
-	for i, c := range []byte(s) {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			out = append(out, ' ')
-		}
-		out = append(out, c)
-	}
-	return string(out)
-}
+func formatAmount(v float64, currency string) string { return store.FormatAmount(v, currency) }
 
 var thousandsRe = regexp.MustCompile(`^\d{1,3}([.,]\d{3})+$`)
 

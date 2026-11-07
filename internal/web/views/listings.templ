@@ -1,0 +1,275 @@
+package views
+
+import "github.com/signaveris-13/uslugi/internal/store"
+
+templ ListingsPage(d ListingsData) {
+	@Layout(d.Page) {
+		<div class="page-head">
+			<h1>Объявления</h1>
+		</div>
+		<nav class="tabs">
+			for _, t := range listingTabs {
+				<a href={ tabURL(t.Status) } class={ templ.KV("active", d.Filter.Status == t.Status) }>
+					{ t.Label }
+					if t.Status == store.ListingModeration && d.QueueCount > 0 {
+						<span class="tab-count">{ countLabel(d.QueueCount) }</span>
+					}
+				</a>
+			}
+		</nav>
+		<div id="results">
+			if len(d.Rows) == 0 {
+				if d.Filter.Status == store.ListingModeration {
+					<p class="empty">Очередь пуста — все объявления проверены.</p>
+				} else {
+					<p class="empty">Объявлений нет.</p>
+				}
+			} else {
+				<table class="leads">
+					<thead>
+						<tr>
+							<th>Объявление</th>
+							<th>Категория</th>
+							<th>Город</th>
+							<th>Исполнитель</th>
+							<th>Статус</th>
+							if d.Filter.Status == store.ListingModeration {
+								<th>Ждёт с</th>
+							} else {
+								<th>Обновлено</th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, r := range d.Rows {
+							<tr>
+								<td><a href={ listingURL(r.ID) }>{ titleOr(r.Title) }</a></td>
+								<td>{ deref(r.CategoryName) }</td>
+								<td>{ deref(r.Cities) }</td>
+								<td class="contacts">
+									<span class="strong">{ r.ProviderName }</span>
+									if r.Username != nil {
+										<a href={ telegramURL(*r.Username) } target="_blank" rel="noopener">{ "@" + *r.Username }</a>
+									}
+								</td>
+								<td><span class={ listingStatusClass(r.Status) }>{ listingStatusLabel(r.Status) }</span></td>
+								<td class="muted">
+									if d.Filter.Status == store.ListingModeration {
+										{ timeOr(r.SubmittedAt, d.TZ) }
+									} else {
+										{ formatTime(r.UpdatedAt, d.TZ) }
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+templ ListingPage(d ListingData) {
+	@Layout(d.Page) {
+		{{ l := d.Listing }}
+		<div class="page-head">
+			<p class="muted"><a href="/listings">← Объявления</a></p>
+			<h1>
+				{ titleOr(l.Title) }
+				<span class={ listingStatusClass(l.Status) }>{ listingStatusLabel(l.Status) }</span>
+			</h1>
+			<p class="muted">Отправлено { timeOr(l.SubmittedAt, d.TZ) } · создано { formatTime(l.CreatedAt, d.TZ) }</p>
+		</div>
+		if d.Error != "" {
+			<p class="flash flash-error">{ d.Error }</p>
+		}
+		if d.Notice != "" {
+			<p class="flash">{ d.Notice }</p>
+		}
+		<div class="lead-layout">
+			<div>
+				if len(l.PhotoFileIDs) > 0 {
+					<section class="panel">
+						<h2>Фото · { countLabel(len(l.PhotoFileIDs)) }</h2>
+						<div class="photos">
+							for _, p := range l.PhotoFileIDs {
+								<a href={ photoURL(p) } target="_blank" rel="noopener"><img src={ string(photoURL(p)) } alt="Фото объявления" loading="lazy"/></a>
+							}
+						</div>
+					</section>
+				}
+				<section class="panel">
+					<h2>Карточка</h2>
+					<dl class="facts">
+						<dt>Категория</dt>
+						<dd>
+							if l.PrimaryCategory != nil {
+								<b>{ l.PrimaryCategory.Name }</b>
+								if len(l.ExtraCategories) > 0 {
+									{ " · " + extrasText(l) }
+								}
+							} else {
+								—
+							}
+						</dd>
+						<dt>Где</dt>
+						<dd>{ citiesText(l) }</dd>
+						<dt>Цена</dt>
+						<dd>{ l.PriceText() }</dd>
+						<dt>Описание</dt>
+						<dd class="pre">{ deref(l.Description) }</dd>
+						<dt>Языки</dt>
+						<dd>{ languagesText(l.Languages) }</dd>
+						<dt>График</dt>
+						<dd>
+							if l.Schedule != nil {
+								{ *l.Schedule }
+							} else {
+								—
+							}
+						</dd>
+						<dt>Контакты</dt>
+						<dd class="contacts">
+							if l.ContactTelegram != nil {
+								<a href={ telegramURL(*l.ContactTelegram) } target="_blank" rel="noopener">{ "Telegram @" + *l.ContactTelegram }</a>
+							}
+							if l.ContactWhatsApp != nil {
+								<span>{ "WhatsApp " + *l.ContactWhatsApp }</span>
+							}
+							if l.ContactPhone != nil {
+								<span>{ "Телефон " + *l.ContactPhone }</span>
+							}
+							if l.ContactInstagram != nil {
+								<span>{ "Instagram " + *l.ContactInstagram }</span>
+							}
+						</dd>
+					</dl>
+				</section>
+			</div>
+			<aside class="lead-side">
+				@moderationPanel(d)
+				@providerPanel(d)
+				if len(d.Duplicates) > 0 {
+					<section class="panel panel-warn">
+						<h2>Возможные дубли</h2>
+						<p class="hint">Те же Telegram, телефон или WhatsApp в других объявлениях.</p>
+						<ul>
+							for _, r := range d.Duplicates {
+								<li>
+									<a href={ listingURL(r.ID) }>{ titleOr(r.Title) }</a>
+									<span class={ listingStatusClass(r.Status) }>{ listingStatusLabel(r.Status) }</span>
+								</li>
+							}
+						</ul>
+					</section>
+				}
+				if len(d.History) > 0 {
+					<section class="panel">
+						<h2>История решений</h2>
+						<ol class="history">
+							for _, h := range d.History {
+								<li>
+									<div><b>{ auditLabel(h.Action) }</b> · { deref(h.ActorName) }</div>
+									<div class="muted">{ formatTime(h.CreatedAt, d.TZ) }</div>
+									if h.Reason != nil {
+										<div>{ *h.Reason }</div>
+									}
+								</li>
+							}
+						</ol>
+					</section>
+				}
+			</aside>
+		</div>
+	}
+}
+
+templ moderationPanel(d ListingData) {
+	{{ l := d.Listing }}
+	<section class="panel">
+		<h2>Решение</h2>
+		switch l.Status {
+			case store.ListingModeration:
+				<p class="hint">Проверь по чек-листу: категория соответствует услуге, контакты рабочие, нет запрещённого (медицина, инъекции, интим-услуги), не дубль.</p>
+				<form method="post" action={ templ.SafeURL(listingAction(l.ID, "approve")) } hx-boost="false">
+					<button type="submit" class="button big wide">✅ Одобрить и опубликовать</button>
+				</form>
+				@rejectForm(l, "Отклонить")
+			case store.ListingPublished:
+				<p class="hint">Объявление в каталоге. Если нашлась проблема — сними его с причиной, исполнитель исправит и отправит снова.</p>
+				@rejectForm(l, "Снять с публикации")
+			case store.ListingRejected:
+				<p class="hint">Ждём, пока исполнитель исправит объявление в боте.</p>
+				if l.RejectionReason != nil {
+					<p><b>Причина:</b> { *l.RejectionReason }</p>
+				}
+			case store.ListingDraft:
+				<p class="hint">Черновик — исполнитель ещё заполняет его в боте.</p>
+			default:
+				<p class="hint">Действий нет.</p>
+		}
+	</section>
+}
+
+templ rejectForm(l store.Listing, label string) {
+	<form class="reject-form" method="post" action={ templ.SafeURL(listingAction(l.ID, "reject")) } hx-boost="false">
+		<label>
+			Причина
+			<select name="reason">
+				<option value="">Своими словами ↓</option>
+				for _, r := range rejectReasons() {
+					<option value={ r }>{ r }</option>
+				}
+			</select>
+		</label>
+		<label>
+			Комментарий для исполнителя
+			<textarea name="comment" rows="2" placeholder="Что именно поправить"></textarea>
+		</label>
+		<button type="submit" class="button secondary wide">{ label }</button>
+	</form>
+}
+
+templ providerPanel(d ListingData) {
+	{{ p := d.Provider }}
+	<section class="panel">
+		<h2>Исполнитель</h2>
+		<dl class="facts">
+			<dt>Имя</dt>
+			<dd>{ p.DisplayName }</dd>
+			<dt>Telegram</dt>
+			<dd>
+				if p.Username != nil {
+					<a href={ telegramURL(*p.Username) } target="_blank" rel="noopener">{ "@" + *p.Username }</a>
+				} else {
+					<span class="muted">без username · ID { id(p.TelegramID) }</span>
+				}
+			</dd>
+			<dt>Объявлений</dt>
+			<dd>{ countLabel(p.Listings) }</dd>
+			<dt>В Uslugi с</dt>
+			<dd>{ formatTime(p.CreatedAt, d.TZ) }</dd>
+			if p.LeadID != nil {
+				<dt>Лид в CRM</dt>
+				<dd><a href={ leadURL(*p.LeadID) }>Открыть лид</a></dd>
+			}
+		</dl>
+		if p.IsBlocked {
+			<p class="flash flash-error">Исполнитель заблокирован.</p>
+			<form method="post" action={ templ.SafeURL("/providers/" + id(p.ID) + "/unblock") } hx-boost="false">
+				<input type="hidden" name="back" value={ string(listingURL(d.Listing.ID)) }/>
+				<button type="submit" class="button secondary wide">Разблокировать</button>
+			</form>
+		} else {
+			<details class="danger-zone">
+				<summary>Заблокировать исполнителя</summary>
+				<form method="post" action={ templ.SafeURL("/providers/" + id(p.ID) + "/block") } hx-boost="false">
+					<input type="hidden" name="back" value={ string(listingURL(d.Listing.ID)) }/>
+					<p class="hint">Все его объявления уйдут в архив, новые разместить не сможет.</p>
+					<input name="reason" placeholder="Причина: мошенничество, спам…" required/>
+					<button type="submit" class="button wide">Заблокировать</button>
+				</form>
+			</details>
+		}
+	</section>
+}

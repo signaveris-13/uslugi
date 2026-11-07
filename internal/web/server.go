@@ -21,12 +21,14 @@ var staticFS embed.FS
 type Server struct {
 	store       *store.Store
 	log         *slog.Logger
+	tg          Telegram
 	botUsername string
 	secure      bool // cookie только по HTTPS (всё, кроме локального запуска)
 	tz          *time.Location
 }
 
 type Options struct {
+	Telegram     Telegram // nil — без уведомлений и фото
 	BotUsername  string
 	SecureCookie bool
 	TimeZone     *time.Location
@@ -37,7 +39,7 @@ func New(s *store.Store, log *slog.Logger, opt Options) *Server {
 	if tz == nil {
 		tz = time.UTC
 	}
-	return &Server{store: s, log: log, botUsername: opt.BotUsername, secure: opt.SecureCookie, tz: tz}
+	return &Server{store: s, log: log, tg: opt.Telegram, botUsername: opt.BotUsername, secure: opt.SecureCookie, tz: tz}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -65,6 +67,14 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /leads/{id}/invite", auth(s.leadInvite))
 	mux.Handle("POST /leads/{id}/touches", auth(s.leadTouch))
 
+	mux.Handle("GET /listings", auth(s.listingsList))
+	mux.Handle("GET /listings/{id}", auth(s.listingShow))
+	mux.Handle("POST /listings/{id}/approve", auth(s.listingApprove))
+	mux.Handle("POST /listings/{id}/reject", auth(s.listingReject))
+	mux.Handle("POST /providers/{id}/block", auth(s.providerBlock))
+	mux.Handle("POST /providers/{id}/unblock", auth(s.providerUnblock))
+	mux.Handle("GET /media/tg/{fileID}", auth(s.telegramMedia))
+
 	return securityHeaders(mux)
 }
 
@@ -78,8 +88,12 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-func (s *Server) page(me store.TeamMember, title, nav string) views.Page {
-	return views.Page{Title: title, Me: me, Nav: nav, TZ: s.tz}
+func (s *Server) page(r *http.Request, me store.TeamMember, title, nav string) views.Page {
+	n, err := s.store.CountModerationQueue(r.Context())
+	if err != nil {
+		s.log.Warn("очередь модерации", "err", err)
+	}
+	return views.Page{Title: title, Me: me, Nav: nav, TZ: s.tz, QueueCount: n}
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, c templ.Component) {

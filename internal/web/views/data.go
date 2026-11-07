@@ -15,10 +15,11 @@ import (
 
 // Page — общие данные для каждой страницы админки.
 type Page struct {
-	Title string
-	Me    store.TeamMember
-	Nav   string // "list", "board", "new"
-	TZ    *time.Location
+	Title      string
+	Me         store.TeamMember
+	Nav        string // "list", "board", "new", "listings"
+	TZ         *time.Location
+	QueueCount int // объявлений ждут модерации — бейдж в меню
 }
 
 type CategoryGroup struct {
@@ -172,4 +173,140 @@ func statusClass(s string) string {
 		return "badge badge-off"
 	}
 	return "badge"
+}
+
+type ListingsData struct {
+	Page
+	Rows   []store.ListingRow
+	Filter store.ListingFilter
+}
+
+type ListingData struct {
+	Page
+	Listing    store.Listing
+	Provider   store.ProviderInfo
+	Duplicates []store.ListingRow
+	History    []store.ListingEvent
+	Error      string
+	Notice     string
+}
+
+// Вкладки списка объявлений: статус → подпись.
+var listingTabs = []struct{ Status, Label string }{
+	{store.ListingModeration, "На модерации"},
+	{store.ListingPublished, "Опубликованные"},
+	{store.ListingRejected, "Отклонённые"},
+	{store.ListingPaused, "На паузе"},
+	{store.ListingArchived, "Архив"},
+	{"", "Все"},
+}
+
+func listingStatusLabel(s string) string {
+	if l, ok := store.ListingStatusLabels[s]; ok {
+		return l
+	}
+	return s
+}
+
+func listingStatusClass(s string) string {
+	switch s {
+	case store.ListingModeration:
+		return "badge badge-progress"
+	case store.ListingPublished:
+		return "badge badge-done"
+	case store.ListingRejected, store.ListingArchived:
+		return "badge badge-off"
+	}
+	return "badge"
+}
+
+func listingURL(v int64) templ.SafeURL { return templ.URL("/listings/" + id(v)) }
+
+func listingAction(v int64, action string) string { return "/listings/" + id(v) + "/" + action }
+
+func tabURL(status string) templ.SafeURL {
+	if status == "" {
+		return templ.URL("/listings?status=all")
+	}
+	return templ.URL("/listings?status=" + status)
+}
+
+func photoURL(fileID string) templ.SafeURL { return templ.URL("/media/tg/" + url.PathEscape(fileID)) }
+
+func titleOr(t *string) string {
+	if t == nil || *t == "" {
+		return "Без названия"
+	}
+	return *t
+}
+
+func timeOr(t *time.Time, tz *time.Location) string {
+	if t == nil {
+		return "—"
+	}
+	return formatTime(*t, tz)
+}
+
+func languagesText(codes []string) string {
+	out := ""
+	for i, c := range codes {
+		if i > 0 {
+			out += ", "
+		}
+		if l, ok := store.LanguageLabels[c]; ok {
+			out += l
+		} else {
+			out += c
+		}
+	}
+	return out
+}
+
+func citiesText(l store.Listing) string {
+	out := ""
+	for i, c := range l.Cities {
+		if i > 0 {
+			out += ", "
+		}
+		out += c.Name
+	}
+	if l.TravelsToClient {
+		if out != "" {
+			out += " · "
+		}
+		out += "выезд к клиенту"
+	}
+	return out
+}
+
+func extrasText(l store.Listing) string {
+	out := ""
+	for i, c := range l.ExtraCategories {
+		if i > 0 {
+			out += ", "
+		}
+		out += c.Name
+	}
+	return out
+}
+
+var auditLabels = map[string]string{
+	"listing.approve": "Одобрено",
+	"listing.reject":  "Отклонено",
+}
+
+func auditLabel(a string) string {
+	if l, ok := auditLabels[a]; ok {
+		return l
+	}
+	return a
+}
+
+func rejectReasons() []string { return store.RejectReasons }
+
+func countBadge(n int) string {
+	if n > 99 {
+		return "99+"
+	}
+	return countLabel(n)
 }

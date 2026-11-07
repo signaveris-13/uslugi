@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"os"
 	"testing"
@@ -187,5 +188,103 @@ func TestLoginFlow(t *testing.T) {
 	}
 	if _, err := s.SessionMember(ctx, sid); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("после выхода: %v", err)
+	}
+}
+
+func TestModeration(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	m := testMember(t, s, pool)
+
+	tg := TelegramUser{ID: 7_000_000_000 + rand.Int64N(1_000_000_000), Username: fmt.Sprintf("mod_test_%d", rand.IntN(1e6)), FirstName: "Ольга"}
+	u, _, err := s.UpsertBotUser(ctx, tg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		pool.Exec(ctx, `DELETE FROM listing WHERE provider_id IN (SELECT id FROM provider WHERE user_id = $1)`, u.ID)
+		pool.Exec(ctx, `DELETE FROM provider WHERE user_id = $1`, u.ID)
+		pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, u.ID)
+	})
+	p, err := s.EnsureProvider(ctx, u, "Ольга")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var catID, cityID int64
+	pool.QueryRow(ctx, `SELECT id FROM category WHERE slug = 'brows-lashes'`).Scan(&catID)
+	pool.QueryRow(ctx, `SELECT id FROM city WHERE slug = 'nha-trang'`).Scan(&cityID)
+	newListing := func(title string) int64 {
+		id, err := s.CreateListingDraft(ctx, p.ID, ListingDraftInput{
+			CategoryID: catID, CityID: cityID, Title: title, Description: "Ламинирование, наращивание",
+			Telegram: tg.Username, Currency: "VND",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetPriceType(ctx, id, "negotiable"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SubmitListing(ctx, id, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+
+	a := newListing("Ресницы")
+	if n, _ := s.CountModerationQueue(ctx); n < 1 {
+		t.Fatalf("очередь пуста")
+	}
+	queue, err := s.ListListings(ctx, ListingFilter{Status: ListingModeration, Query: tg.Username})
+	if err != nil || len(queue) != 1 || queue[0].ID != a {
+		t.Fatalf("очередь: %+v %v", queue, err)
+	}
+
+	res, err := s.ApproveListing(ctx, m.ID, a)
+	if err != nil || res.TelegramID != tg.ID || res.Title != "Ресницы" {
+		t.Fatalf("одобрение: %+v %v", res, err)
+	}
+	if _, err := s.ApproveListing(ctx, m.ID, a); err == nil {
+		t.Fatal("повторное одобрение должно не пройти")
+	}
+
+	b := newListing("Ресницы ещё раз")
+	l, _ := s.GetListing(ctx, b, 0)
+	dups, err := s.ListingDuplicates(ctx, l)
+	if err != nil || len(dups) != 1 || dups[0].ID != a {
+		t.Fatalf("дубли: %+v %v", dups, err)
+	}
+
+	var ve ValidationError
+	if _, err := s.RejectListing(ctx, m.ID, b, " "); !errors.As(err, &ve) {
+		t.Fatalf("отказ без причины: %v", err)
+	}
+	if _, err := s.RejectListing(ctx, m.ID, b, "Дубль существующего объявления"); err != nil {
+		t.Fatal(err)
+	}
+	l, _ = s.GetListing(ctx, b, 0)
+	if l.Status != ListingRejected || deref(l.RejectionReason) != "Дубль существующего объявления" {
+		t.Fatalf("после отказа: %q %v", l.Status, l.RejectionReason)
+	}
+	// Исполнитель исправляет и отправляет снова.
+	if err := s.SubmitListing(ctx, b, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	hist, _ := s.ListingHistory(ctx, b)
+	if len(hist) != 1 || hist[0].Action != "listing.reject" {
+		t.Fatalf("история: %+v", hist)
+	}
+
+	if err := s.BlockProvider(ctx, m.ID, p.ID, "мошенничество"); err != nil {
+		t.Fatal(err)
+	}
+	l, _ = s.GetListing(ctx, a, 0)
+	if l.Status != ListingArchived {
+		t.Fatalf("после блокировки: %q", l.Status)
+	}
+	info, _ := s.ProviderInfo(ctx, p.ID)
+	if !info.IsBlocked {
+		t.Fatal("исполнитель не заблокирован")
 	}
 }

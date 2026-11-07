@@ -64,7 +64,7 @@ func (s *Server) leadsList(w http.ResponseWriter, r *http.Request, me store.Team
 		return
 	}
 	s.render(w, r, http.StatusOK, views.LeadsPage(views.LeadsData{
-		Page: s.page(me, "Лиды", "list"), Refs: refs, Leads: leads, Filter: f,
+		Page: s.page(r, me, "Лиды", "list"), Refs: refs, Leads: leads, Filter: f,
 	}))
 }
 
@@ -91,7 +91,7 @@ func (s *Server) leadsBoard(w http.ResponseWriter, r *http.Request, me store.Tea
 		cols = append(cols, views.BoardColumn{Status: st, Leads: byStatus[st]})
 	}
 	s.render(w, r, http.StatusOK, views.BoardPage(views.BoardData{
-		Page: s.page(me, "Канбан", "board"), Refs: refs, Columns: cols, Filter: f, Back: r.URL.RequestURI(),
+		Page: s.page(r, me, "Канбан", "board"), Refs: refs, Columns: cols, Filter: f, Back: r.URL.RequestURI(),
 	}))
 }
 
@@ -106,7 +106,7 @@ func (s *Server) renderLeadForm(w http.ResponseWriter, r *http.Request, me store
 		return
 	}
 	s.render(w, r, status, views.LeadPage(views.LeadData{
-		Page: s.page(me, "Новый лид", "new"), Refs: refs, Form: in, IsNew: true, Error: errText,
+		Page: s.page(r, me, "Новый лид", "new"), Refs: refs, Form: in, IsNew: true, Error: errText,
 	}))
 }
 
@@ -161,7 +161,7 @@ func (s *Server) renderLead(w http.ResponseWriter, r *http.Request, me store.Tea
 		inviteURL = "https://t.me/" + url.PathEscape(s.botUsername) + "?start=inv_" + *l.InviteToken
 	}
 	s.render(w, r, status, views.LeadPage(views.LeadData{
-		Page: s.page(me, l.DisplayName(), ""), Refs: refs, Lead: l, Form: form,
+		Page: s.page(r, me, l.DisplayName(), ""), Refs: refs, Lead: l, Form: form,
 		Error: errText, Notice: notices[msg], Touches: touches, Duplicates: dups, InviteURL: inviteURL,
 	}))
 }
