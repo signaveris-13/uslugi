@@ -60,8 +60,19 @@ mkdir -p "$ROOT/deploy/backups"
 # Бэкапы пишет контейнер postgres (uid 70)
 chown 70:70 "$ROOT/deploy/backups"
 
+echo "==> Сводка для адвайзера"
+if ! grep -q '^STATUS_TOKEN=.' "$ENV_FILE"; then
+  sed -i '/^STATUS_TOKEN=/d' "$ENV_FILE"
+  echo "STATUS_TOKEN=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" >> "$ENV_FILE"
+fi
+mkdir -p "$ROOT/deploy/status"
+chmod +x "$ROOT/deploy/status.sh"
+echo "*/10 * * * * root $ROOT/deploy/status.sh >/dev/null 2>&1" > /etc/cron.d/uslugi-status
+chmod 644 /etc/cron.d/uslugi-status
+
 echo "==> Сборка и запуск"
 docker compose -f deploy/compose.yml --env-file "$ENV_FILE" up -d --build
+bash "$ROOT/deploy/status.sh" || true
 
 DOMAIN=$(grep '^DOMAIN=' "$ENV_FILE" | cut -d= -f2)
 echo

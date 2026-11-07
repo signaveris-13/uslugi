@@ -27,3 +27,4 @@ go.work.sum
 # Прод-настройки и бэкапы на сервере
 deploy/.env
 deploy/backups/
+deploy/status/

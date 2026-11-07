@@ -12,6 +12,8 @@
 | caddy    | HTTPS: сам выпускает и продлевает сертификат Let's Encrypt |
 | backup   | раз в сутки дамп базы в `deploy/backups/`, хранится 30 дней |
 
+Ещё на сервере работает `deploy/status.sh`: cron запускает его раз в 10 минут. Он собирает сводку о здоровье системы: память, swap, диск, контейнеры и их перезапуски, ошибки в логах, базу, бэкапы, сертификат. Сводка лежит в `deploy/status/status.txt`.
+
 Нужен сервер на Ubuntu или Debian с открытыми портами 22, 80 и 443.
 
 ## Первая установка
@@ -55,6 +57,12 @@
 cd /opt/uslugi && bash deploy/update.sh
 ```
 
+## Сводка для адвайзера
+
+Caddy отдаёт сводку по секретной ссылке `https://DOMAIN/ops/STATUS_TOKEN/status.txt`. Её читает ежедневная задача-адвайзер. Токен `update.sh` создаёт сам и пишет в `deploy/.env`, а ссылку печатает в конце. Токены, пароли и адреса баз из логов в сводку не попадают.
+
+Новая ссылка: удали строку `STATUS_TOKEN` из `deploy/.env` и выполни `bash deploy/update.sh`. Потом обнови ссылку в задаче-адвайзере.
+
 ## Полезное
 
 ```sh
@@ -62,6 +70,7 @@ cd /opt/uslugi
 docker compose -f deploy/compose.yml ps
 docker compose -f deploy/compose.yml logs -f web bot
 docker compose -f deploy/compose.yml restart bot
+bash deploy/status.sh && cat deploy/status/status.txt   # сводка прямо сейчас
 ```
 
 Свой домен: добавь A-запись на IP сервера, поменяй `DOMAIN` в `deploy/.env` и выполни `bash deploy/update.sh`.

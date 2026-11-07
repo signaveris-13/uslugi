@@ -66,11 +66,14 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN}
+      # Секрет в пути к сводке для адвайзера; без него путь не откроется.
+      STATUS_TOKEN: ${STATUS_TOKEN:?STATUS_TOKEN не задан, запусти bash deploy/update.sh}
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./status:/srv/status:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
