@@ -72,6 +72,7 @@ jobs:
           POSTGRES_PASSWORD=ci_$(openssl rand -hex 12)
           BOT_TOKEN=
           TEAM_TELEGRAM_IDS=1
+          STATUS_TOKEN=ci_$(openssl rand -hex 12)
           EOF
 
       - name: Compose-файл валиден
