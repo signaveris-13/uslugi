@@ -28,6 +28,18 @@ templ Layout(p Page) {
 							<span class="nav-badge" title="Объявления на модерации и новые жалобы">{ countBadge(p.AttentionCount()) }</span>
 						}
 					</a>
+					<a href="/reviews" class={ templ.KV("active", p.Nav == "reviews") }>
+						Отзывы
+						if p.ReviewCount > 0 {
+							<span class="nav-badge" title="Отзывы, ответы мастеров и споры на проверке">{ countBadge(p.ReviewCount) }</span>
+						}
+					</a>
+					<a href="/support" class={ templ.KV("active", p.Nav == "support") }>
+						Поддержка
+						if p.SupportCount > 0 {
+							<span class="nav-badge" title="Обращения ждут ответа">{ countBadge(p.SupportCount) }</span>
+						}
+					</a>
 					<a href="/leads/new" class={ "button", templ.KV("active", p.Nav == "new") }>+ Новый лид</a>
 				</nav>
 				<div class="me">

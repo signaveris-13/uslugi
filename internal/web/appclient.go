@@ -33,6 +33,7 @@ func (s *Server) appClientRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /app/new", s.appUser(s.appNew))
 	mux.Handle("GET /app/listings/{id}/manage", s.appUser(s.appManage))
 	mux.Handle("POST /app/listings/{id}/manage/{action}", s.appUser(s.appManageAction))
+	s.appReviewRoutes(mux)
 }
 
 const appPageSize = 20
@@ -278,6 +279,10 @@ func (s *Server) renderListingCard(w http.ResponseWriter, r *http.Request, u sto
 	for _, ph := range l.Photos {
 		d.PhotoURLs = append(d.PhotoURLs, s.photoLink(ph, now))
 	}
+	d.ViewerID = u.ID
+	d.Summary, _ = s.store.ListingReviewSummary(ctx, l.ID)
+	d.Reviews, _ = s.store.ListingReviews(ctx, l.ID, u.ID, 3)
+	d.CanReview = !d.Own && s.canLeaveReview(r, u, l.ID)
 	if !d.Own {
 		_ = s.store.LogEvent(ctx, "listing_viewed", u.ID, "listing", l.ID, "miniapp", nil)
 	}
@@ -432,6 +437,7 @@ func (s *Server) appProfile(w http.ResponseWriter, r *http.Request, u store.User
 		d.Limit = s.store.ProviderListingLimit(ctx, p)
 		cards, _ := s.store.ProviderCards(ctx, p.ID)
 		d.Summary = providerSummary(cards)
+		d.Reviews, _ = s.store.ProviderReviewSummary(ctx, p.ID)
 	}
 	s.render(w, r, http.StatusOK, views.AppProfile(d))
 }

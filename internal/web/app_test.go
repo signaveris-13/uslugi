@@ -290,6 +290,8 @@ func testClientScreens(t *testing.T, e *env, master *appClient, id, catID, cityI
 	t.Cleanup(func() {
 		ctx := context.Background()
 		e.pool.Exec(ctx, `DELETE FROM event WHERE user_id = (SELECT id FROM users WHERE telegram_id = $1)`, clientID)
+		e.pool.Exec(ctx, `DELETE FROM review WHERE author_user_id = (SELECT id FROM users WHERE telegram_id = $1)`, clientID)
+		e.pool.Exec(ctx, `DELETE FROM support_ticket WHERE user_id = (SELECT id FROM users WHERE telegram_id = $1)`, clientID)
 		e.pool.Exec(ctx, `DELETE FROM users WHERE telegram_id = $1`, clientID)
 	})
 	user, _ := json.Marshal(map[string]any{"id": clientID, "first_name": "Клиент"})
@@ -356,6 +358,8 @@ func testClientScreens(t *testing.T, e *env, master *appClient, id, catID, cityI
 	_, body = c.form("/app/new", nil)
 	mustContain(t, body, "Разместить услуги", "Создать объявление")
 
+	testReviewsAndSupport(t, e, master, c, id, clientID)
+
 	// Исполнитель: статистика, пауза, возврат и удаление.
 	_, body, _ = master.do(http.MethodGet, "/app/profile", nil, "")
 	mustContain(t, body, "За 7 дней", "Мои объявления", "1 опубликовано")
@@ -372,4 +376,97 @@ func testClientScreens(t *testing.T, e *env, master *appClient, id, catID, cityI
 	mustContain(t, body, "Объявление удалено")
 	_, body, _ = c.do(http.MethodGet, "/app/favorites", nil, "")
 	mustContain(t, body, "Снято с публикации")
+}
+
+// testReviewsAndSupport — отзыв через модерацию, ответ мастера, спор и поддержка.
+func testReviewsAndSupport(t *testing.T, e *env, master, c *appClient, id, clientID int64) {
+	// Клиент открывал контакты — может оставить отзыв.
+	_, body, _ := c.do(http.MethodGet, fmt.Sprintf("/app/l/%d", id), nil, "")
+	mustContain(t, body, "Отзывы", "Оставить отзыв")
+	_, body, _ = c.do(http.MethodGet, fmt.Sprintf("/app/l/%d/review", id), nil, "")
+	mustContain(t, body, "Отзыв о мастере", "Пунктуальность", "Показывать имя")
+	_, body = c.form(fmt.Sprintf("/app/l/%d/review", id), url.Values{"rating": {"9"}})
+	mustContain(t, body, "оценку от 1 до 5")
+	_, body = c.form(fmt.Sprintf("/app/l/%d/review", id), url.Values{
+		"rating": {"4"}, "tag": {"Качество", "Пунктуальность", "Взлом"}, "text": {"Приехала вовремя, всё аккуратно."}, "show_name": {"1"},
+	})
+	mustContain(t, body, "Отзыв на проверке")
+	_, body, _ = c.do(http.MethodGet, fmt.Sprintf("/app/l/%d/reviews", id), nil, "")
+	mustContain(t, body, "Приехала вовремя", "На проверке — видите только вы")
+	if code, _ := c.form(fmt.Sprintf("/app/l/%d/review", id), url.Values{"rating": {"5"}}); code != http.StatusOK {
+		t.Fatalf("повторный отзыв: %d", code)
+	}
+	// Мастер своего отзыва не видит, пока модератор не одобрит.
+	_, body, _ = master.do(http.MethodGet, "/app/reviews", nil, "")
+	if strings.Contains(body, "Приехала вовремя") {
+		t.Fatal("отзыв виден мастеру до модерации")
+	}
+
+	var reviewID int64
+	e.pool.QueryRow(e.ctx, `SELECT id FROM review WHERE listing_id = $1`, id).Scan(&reviewID)
+	_, page, _ := e.do(http.MethodGet, "/reviews", nil)
+	mustContain(t, page, "Отзывы на проверке", "Приехала вовремя", "Писал мастеру через Uslugi")
+	if code, _, _ := e.do(http.MethodPost, fmt.Sprintf("/reviews/%d/decide", reviewID), url.Values{"kind": {"review"}, "approve": {"0"}}); code != http.StatusUnprocessableEntity {
+		t.Fatalf("отказ без причины: %d", code)
+	}
+	code, _, h := e.do(http.MethodPost, fmt.Sprintf("/reviews/%d/decide", reviewID), url.Values{"kind": {"review"}, "approve": {"1"}})
+	if code != http.StatusSeeOther || !strings.Contains(h.Get("Location"), "msg=ok") {
+		t.Fatalf("одобрение отзыва: %d %s", code, h.Get("Location"))
+	}
+	if n := e.tg.last(t); n.ChatID != clientID || !strings.Contains(n.Text, "опубликован") {
+		t.Fatalf("уведомление автору: %+v", n)
+	}
+	_, body, _ = c.do(http.MethodGet, fmt.Sprintf("/app/l/%d", id), nil, "")
+	mustContain(t, body, "Приехала вовремя", "Все отзывы")
+	if strings.Contains(body, "Оставить отзыв") {
+		t.Fatal("второй отзыв предлагается")
+	}
+
+	// Мастер отвечает — ответ тоже через модерацию.
+	_, body, _ = master.do(http.MethodGet, "/app/reviews", nil, "")
+	mustContain(t, body, "Отзывы обо мне", "4.0", "Приехала вовремя", "Отправить ответ")
+	_, body = master.form(fmt.Sprintf("/app/reviews/%d/reply", reviewID), url.Values{"text": {""}})
+	mustContain(t, body, "Напишите ответ")
+	_, body = master.form(fmt.Sprintf("/app/reviews/%d/reply", reviewID), url.Values{"text": {"Спасибо, жду снова!"}})
+	mustContain(t, body, "Ответ отправлен на проверку", "Ваш ответ на проверке")
+	e.do(http.MethodPost, fmt.Sprintf("/reviews/%d/decide", reviewID), url.Values{"kind": {"reply"}, "approve": {"1"}})
+	_, body, _ = c.do(http.MethodGet, fmt.Sprintf("/app/l/%d/reviews", id), nil, "")
+	mustContain(t, body, "Ответ мастера", "Спасибо, жду снова!")
+
+	// Спор: модератор оставляет отзыв.
+	_, body = master.form(fmt.Sprintf("/app/reviews/%d/dispute", reviewID), url.Values{"reason": {"Клиентка путает меня с другим мастером"}})
+	mustContain(t, body, "Модератор проверит отзыв")
+	_, page, _ = e.do(http.MethodGet, fmt.Sprintf("/reviews?id=%d", reviewID), nil)
+	mustContain(t, page, "Спор", "путает меня")
+	e.do(http.MethodPost, fmt.Sprintf("/reviews/%d/decide", reviewID), url.Values{"kind": {"dispute"}, "approve": {"0"}})
+	if n := e.tg.last(t); !strings.Contains(n.Text, "отзыв остаётся") {
+		t.Fatalf("уведомление о споре: %+v", n)
+	}
+
+	// Поддержка: обращение, ответ команды, закрытие.
+	_, body, _ = c.do(http.MethodGet, "/app/support", nil, "")
+	mustContain(t, body, "С чем помочь?", "Ошибка в приложении")
+	_, body = c.form("/app/support", url.Values{"topic": {"bug"}, "text": {""}})
+	mustContain(t, body, "Напишите, что случилось")
+	_, body = c.form("/app/support", url.Values{"topic": {"bug"}, "text": {"Не открывается WhatsApp"}})
+	mustContain(t, body, "Обращение №", "Не открывается WhatsApp", "Ждёт ответа")
+	var ticketID int64
+	e.pool.QueryRow(e.ctx, `SELECT t.id FROM support_ticket t JOIN users u ON u.id = t.user_id WHERE u.telegram_id = $1`, clientID).Scan(&ticketID)
+	_, page, _ = e.do(http.MethodGet, "/support", nil)
+	mustContain(t, page, "Не открывается WhatsApp", "Ждут ответа")
+	code, _, h = e.do(http.MethodPost, fmt.Sprintf("/support/%d/answer", ticketID), url.Values{"text": {"Обновите Telegram — должно заработать."}})
+	if code != http.StatusSeeOther || !strings.Contains(h.Get("Location"), "msg=sent") {
+		t.Fatalf("ответ поддержки: %d %s", code, h.Get("Location"))
+	}
+	if n := e.tg.last(t); n.ChatID != clientID || !strings.Contains(n.Text, "Обновите Telegram") {
+		t.Fatalf("уведомление поддержки: %+v", n)
+	}
+	_, body, _ = c.do(http.MethodGet, fmt.Sprintf("/app/support/%d", ticketID), nil, "")
+	mustContain(t, body, "Поддержка Uslugi", "Обновите Telegram", "Вопрос решён?")
+	_, body = c.form(fmt.Sprintf("/app/support/%d/close", ticketID), nil)
+	mustContain(t, body, "Обращение закрыто")
+	// Чужое обращение не открывается.
+	if code, _, _ := master.do(http.MethodGet, fmt.Sprintf("/app/support/%d", ticketID), nil, ""); code != http.StatusNotFound {
+		t.Fatalf("чужое обращение: %d", code)
+	}
 }

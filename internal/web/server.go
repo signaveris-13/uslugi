@@ -103,6 +103,12 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("GET /media/file/{key...}", auth(s.adminMedia))
 	mux.Handle("GET /complaints", auth(s.complaintsList))
 	mux.Handle("POST /complaints/{id}/resolve", auth(s.complaintResolve))
+	mux.Handle("GET /reviews", auth(s.reviewsPage))
+	mux.Handle("POST /reviews/{id}/decide", auth(s.reviewDecide))
+	mux.Handle("GET /support", auth(s.supportList))
+	mux.Handle("GET /support/{id}", auth(s.supportShow))
+	mux.Handle("POST /support/{id}/answer", auth(s.supportAnswer))
+	mux.Handle("POST /support/{id}/close", auth(s.supportClose))
 
 	return securityHeaders(mux)
 }
@@ -130,7 +136,16 @@ func (s *Server) page(r *http.Request, me store.TeamMember, title, nav string) v
 	if err != nil {
 		s.log.Warn("правки", "err", err)
 	}
-	return views.Page{Title: title, Me: me, Nav: nav, TZ: s.tz, QueueCount: n, ComplaintCount: c, RevisionCount: rv}
+	rc, err := s.store.CountReviewQueue(r.Context())
+	if err != nil {
+		s.log.Warn("отзывы", "err", err)
+	}
+	sc, err := s.store.CountOpenTickets(r.Context())
+	if err != nil {
+		s.log.Warn("поддержка", "err", err)
+	}
+	return views.Page{Title: title, Me: me, Nav: nav, TZ: s.tz, QueueCount: n, ComplaintCount: c, RevisionCount: rv,
+		ReviewCount: rc, SupportCount: sc}
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, c templ.Component) {

@@ -81,6 +81,10 @@ type AppListingData struct {
 	Notice       string
 	Error        string
 	Own          bool
+	Summary      store.ReviewSummary
+	Reviews      []store.Review
+	ViewerID     int64
+	CanReview    bool
 }
 
 type AppComplaintData struct {
@@ -109,6 +113,7 @@ type AppProfileData struct {
 	Active     int
 	Limit      int
 	Summary    string
+	Reviews    store.ReviewSummary
 }
 
 type AppManageData struct {

@@ -241,3 +241,18 @@ body.login { display: grid; place-items: center; min-height: 100vh; }
 .diff .strong { width: 22%; }
 .diff-old { color: var(--muted); text-decoration: line-through; text-decoration-color: rgba(97,101,108,.5); width: 39%; }
 .diff-new { color: var(--text); font-weight: 600; background: var(--ok-soft); width: 39%; }
+
+/* Отзывы и поддержка */
+.review-layout { grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); }
+.queue { display: flex; flex-direction: column; gap: 8px; }
+.queue-item { display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 16px; background: var(--surface); border: 1.5px solid transparent; color: var(--text); font-weight: 600; }
+.queue-item:hover { color: var(--text); border-color: var(--line); }
+.queue-item.active { border-color: var(--red); background: var(--red-soft); }
+.queue-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.checks { display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 16px; background: var(--bg); margin: 16px 0; font-weight: 600; font-size: 14px; }
+.check-ok { color: var(--ok); }
+.check-warn { color: var(--warn-ink); }
+.decide { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.decide label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.history li.from-team { background: var(--bg); border-radius: 12px; padding: 10px 12px; }
+td.clip { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

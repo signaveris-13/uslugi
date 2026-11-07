@@ -22,6 +22,8 @@ type Page struct {
 	QueueCount     int // объявлений ждут модерации
 	ComplaintCount int // новых жалоб
 	RevisionCount  int // правок опубликованных объявлений ждут проверки
+	ReviewCount    int // отзывы, ответы и споры на модерации
+	SupportCount   int // обращения ждут ответа
 }
 
 // AttentionCount — сколько всего ждёт модератора: бейдж в меню.

@@ -1,0 +1,360 @@
+package views
+
+import (
+	"time"
+
+	"github.com/signaveris-13/uslugi/internal/store"
+)
+
+// Блок отзывов в карточке.
+templ listingReviews(l store.Listing, sum store.ReviewSummary, list []store.Review, viewer int64, canReview bool) {
+	<section class="card">
+		<div class="row-between">
+			<h2>Отзывы</h2>
+			if sum.Count > 0 {
+				<span class="rating-inline">
+					@stars(1, 16)
+					<b>{ avgText(sum) }</b>
+					<span class="muted">· { countLabel(sum.Count) }</span>
+				</span>
+			}
+		</div>
+		if len(list) == 0 {
+			<p class="hint">Пока нет отзывов. Если вы уже обращались к мастеру — расскажите, как прошло.</p>
+		}
+		for i, r := range list {
+			if i < 2 {
+				@reviewItem(r, viewer, true)
+			}
+		}
+		<div class="row-gap">
+			if sum.Count > 0 || len(list) > 0 {
+				<button type="button" class="btn btn-grey" hx-get={ reviewsPath(l.ID) } hx-target="#app">Все отзывы</button>
+			}
+			if canReview {
+				<button type="button" class="btn btn-grey" hx-get={ reviewFormPath(l.ID) } hx-target="#app">
+					@icon("star", 18)
+					Оставить отзыв
+				</button>
+			}
+		</div>
+	</section>
+}
+
+templ reviewItem(r store.Review, viewer int64, compact bool) {
+	<article class={ "review", templ.KV("review-compact", compact) }>
+		<div class="review-head">
+			<span class="avatar avatar-sm">{ firstLetter(r.PublicName()) }</span>
+			<div class="grow stack-xs">
+				<b>
+					{ r.PublicName() }
+					if isMine(r, viewer) {
+						<span class="muted">· это вы</span>
+					}
+				</b>
+				<span class="muted">{ reviewDate(r) }</span>
+			</div>
+			@stars(r.Rating, 14)
+		</div>
+		if isMine(r, viewer) && r.Status == store.ReviewModeration {
+			<span class="chip chip-dark">На проверке — видите только вы</span>
+		}
+		if isMine(r, viewer) && r.Status == store.ReviewRejected {
+			<span class="chip chip-warn">Не прошёл проверку</span>
+		}
+		if len(r.Tags) > 0 {
+			<div class="tag-row">
+				for _, t := range r.Tags {
+					<span class="tag">{ t }</span>
+				}
+			</div>
+		}
+		if r.Text != nil {
+			<p class="review-text">{ *r.Text }</p>
+		}
+		if r.ReplyVisible() {
+			<div class="reply">
+				<b>Ответ мастера</b>
+				<span>{ *r.ReplyText }</span>
+			</div>
+		}
+	</article>
+}
+
+templ AppReviews(d AppReviewsData) {
+	<div class="screen">
+		@subHeader("Отзывы", d.ProviderName + " · " + d.Listing.TitleOr(), appListingURL(d.Listing.ID))
+		<div class="list-pad">
+			<section class="card summary">
+				<div class="summary-main">
+					<span class="summary-avg">{ avgText(d.Summary) }</span>
+					@stars(roundRating(d.Summary.Average), 14)
+					<span class="muted">{ reviewsCount(d.Summary.Count) }</span>
+				</div>
+				<div class="dist">
+					for _, n := range starOptions() {
+						<div class="dist-row">
+							<span>{ countLabel(n) }</span>
+							<span class="dist-bar"><span style={ distWidth(d.Summary, n) }></span></span>
+							<span>{ countLabel(d.Summary.ByStars[n]) }</span>
+						</div>
+					}
+				</div>
+			</section>
+			if len(d.Reviews) > 0 {
+				<section class="card review-list">
+					for _, r := range d.Reviews {
+						@reviewItem(r, d.ViewerID, false)
+					}
+				</section>
+			}
+			<p class="hint hint-pad">Отзывы оставляют клиенты, которые писали мастеру через Uslugi. Каждый отзыв и ответ мастера проверяет модератор.</p>
+		</div>
+		if d.CanReview {
+			<div class="bottom-bar">
+				<button type="button" class="btn btn-red btn-block" hx-get={ reviewFormPath(d.Listing.ID) } hx-target="#app">
+					@icon("star", 20)
+					Оставить отзыв
+				</button>
+			</div>
+		}
+	</div>
+}
+
+templ AppReviewForm(d AppReviewFormData) {
+	<div class="screen">
+		@subHeader("Отзыв о мастере", d.ProviderName + " · " + d.Listing.TitleOr(), appListingURL(d.Listing.ID))
+		@notices("", d.Error)
+		<form hx-post={ reviewFormPath(d.Listing.ID) } hx-target="#app">
+			<div class="list-pad">
+				<section class="card">
+					<fieldset class="stars-input">
+						<legend class="sr-only">Оценка</legend>
+						for _, n := range starOptions() {
+							<input type="radio" id={ "star" + countLabel(n) } name="rating" value={ countLabel(n) } checked?={ d.Rating == n }/>
+							<label for={ "star" + countLabel(n) } aria-label={ countLabel(n) + " из 5" }>
+								@iconFilled("star", 40, true)
+							</label>
+						}
+					</fieldset>
+					<p class="hint hint-center">Нажмите на звезду</p>
+				</section>
+				<section class="card">
+					<h2>Что понравилось</h2>
+					<div class="chips">
+						for _, t := range reviewTags() {
+							<label class="chip-check">
+								<input type="checkbox" name="tag" value={ t } checked?={ d.hasTag(t) }/>
+								<span>{ t }</span>
+							</label>
+						}
+					</div>
+				</section>
+				<section class="card">
+					<label class="field field-first">
+						<span>Расскажите подробнее <em>необязательно</em></span>
+						<textarea name="text" rows="5" maxlength="1000" placeholder="Как всё прошло, что понравилось, что нет">{ d.Text }</textarea>
+					</label>
+					<label class="switch">
+						<input type="checkbox" name="show_name" value="1" checked?={ d.ShowName }/>
+						<span class="switch-ui"></span>
+						<span>Показывать имя: <b>{ d.AuthorName }</b></span>
+					</label>
+					<p class="hint">Выключите — и отзыв будет подписан «Клиент Uslugi».</p>
+				</section>
+				<div class="banner banner-warn"><b>Отзыв появится после проверки</b><span>Обычно в течение суток. Без телефонов, ссылок, рекламы и оскорблений.</span></div>
+			</div>
+			<div class="bottom-bar">
+				<button type="submit" class="btn btn-red btn-block">Отправить на проверку</button>
+			</div>
+		</form>
+	</div>
+}
+
+templ AppReviewSent(listingID int64) {
+	<div class="screen">
+		<div class="done">
+			<span class="done-ico">
+				@icon("shield", 40)
+			</span>
+			<h1>Спасибо! Отзыв на проверке</h1>
+			<p class="muted">Проверим в течение суток. Бот напишет, когда отзыв опубликуют.</p>
+		</div>
+		<section class="card timeline">
+			<div class="tl tl-done"><span class="tl-dot">
+				@icon("check", 16)
+			</span><div><b>Отправлен</b><span class="muted">Пока его видите только вы</span></div></div>
+			<div class="tl tl-now"><span class="tl-dot"></span><div><b>Проверка модератором</b><span class="muted">Обычно в течение суток</span></div></div>
+			<div class="tl"><span class="tl-dot"></span><div><b>Опубликован</b><span class="muted">Увидят все клиенты, мастер сможет ответить</span></div></div>
+		</section>
+		<div class="bottom-bar">
+			<button type="button" class="btn btn-grey" hx-get="/app/home" hx-target="#app">На главную</button>
+			<button type="button" class="btn btn-red" hx-get={ appListingURL(listingID) } hx-target="#app">К мастеру</button>
+		</div>
+	</div>
+}
+
+templ AppProviderReviews(d AppProviderReviewsData) {
+	<div class="screen">
+		@subHeader("Отзывы обо мне", avgText(d.Summary) + " · " + reviewsCount(d.Summary.Count), "/app/profile")
+		@notices(d.Notice, "")
+		<div class="list-pad">
+			if len(d.Reviews) == 0 {
+				<section class="card empty-card">
+					<p class="big">Пока нет отзывов</p>
+					<p class="muted">Клиенты могут оставить отзыв, после того как написали вам через Uslugi.</p>
+				</section>
+			}
+			for _, r := range d.Reviews {
+				<section class={ "card", templ.KV("card-accent", r.ReplyText == nil) }>
+					<span class="muted">{ strOr(r.ListingTitle) }</span>
+					@reviewItem(r, 0, false)
+					if d.Error != "" && d.ErrorID == r.ID {
+						<p class="notice notice-error notice-inline">{ d.Error }</p>
+					}
+					switch replyState(r) {
+						case "moderation":
+							<div class="reply reply-pending"><b>Ваш ответ на проверке</b><span>{ strOr(r.ReplyText) }</span></div>
+						case "rejected":
+							<div class="banner banner-warn banner-inline"><b>Ответ не прошёл проверку</b><span>{ strOr(r.ReplyRejection) }</span></div>
+					}
+					if replyState(r) == "" || replyState(r) == "rejected" {
+						<form class="stack" hx-post={ replyPath(r.ID) } hx-target="#app">
+							<label class="field field-first">
+								<span>Ваш ответ</span>
+								<textarea name="text" rows="3" maxlength="1000" placeholder="Спасибо за отзыв!"></textarea>
+							</label>
+							<p class="hint">Ответ появится под отзывом после проверки модератором.</p>
+							<button type="submit" class="btn btn-red btn-block">Отправить ответ</button>
+						</form>
+					}
+					if r.DisputedAt != nil {
+						<span class="chip chip-dark">Оспорено — модератор проверяет</span>
+					} else {
+						<details class="dispute">
+							<summary>Оспорить отзыв</summary>
+							<form class="stack" hx-post={ disputePath(r.ID) } hx-target="#app">
+								<label class="field field-first">
+									<span>Что не так с отзывом?</span>
+									<textarea name="reason" rows="3" maxlength="500" placeholder="Например: этот человек ко мне не обращался"></textarea>
+								</label>
+								<button type="submit" class="btn btn-grey btn-block">Отправить модератору</button>
+							</form>
+						</details>
+					}
+				</section>
+			}
+			<p class="hint hint-pad">Удалить отзыв нельзя. Если он ложный или оскорбительный, оспорьте его — модератор проверит и решит.</p>
+		</div>
+	</div>
+}
+
+// Поддержка -----------------------------------------------------------------------
+
+templ AppSupport(d AppSupportData) {
+	<div class="screen">
+		@subHeader("Поддержка", "Отвечаем в боте, обычно в течение дня", "/app/profile")
+		@notices("", d.Error)
+		<form hx-post="/app/support" hx-target="#app">
+			<div class="list-pad">
+				<span class="label">С чем помочь?</span>
+				<div class="topic-grid">
+					for _, t := range supportTopics() {
+						<label class="topic">
+							<input type="radio" name="topic" value={ t } checked?={ d.Topic == t }/>
+							<span>
+								@icon(topicIcon(t), 22)
+								{ supportTopicLabel(t) }
+							</span>
+						</label>
+					}
+				</div>
+				<section class="card">
+					if len(d.Listings) > 0 {
+						<label class="field field-first">
+							<span>Объявление <em>если вопрос о нём</em></span>
+							<select name="listing_id">
+								<option value="">Не о конкретном объявлении</option>
+								for _, l := range d.Listings {
+									<option value={ id(l.ID) }>{ l.Listing().TitleOr() } · { appStatusLabel(l) }</option>
+								}
+							</select>
+						</label>
+					}
+					<label class={ "field", templ.KV("field-first", len(d.Listings) == 0) }>
+						<span>Сообщение</span>
+						<textarea name="text" rows="5" maxlength="2000" placeholder="Опишите, что случилось" required>{ d.Text }</textarea>
+					</label>
+				</section>
+				if len(d.Tickets) > 0 {
+					<span class="label">Мои обращения</span>
+					for _, t := range d.Tickets {
+						<button type="button" class="big-row" hx-get={ ticketPath(t.ID) } hx-target="#app">
+							<span class="grow stack-sm">
+								<span class={ supportStatusClass(t.Status) }>{ supportStatusLabel(t.Status) }</span>
+								<b class="clamp">{ t.FirstText }</b>
+								<span class="muted">{ supportTopicLabel(t.Topic) } · { ticketNumber(t.ID) }</span>
+							</span>
+							@icon("right", 18)
+						</button>
+					}
+				}
+			</div>
+			<div class="bottom-bar">
+				<button type="submit" class="btn btn-red btn-block">
+					@icon("send", 20)
+					Отправить
+				</button>
+			</div>
+		</form>
+	</div>
+}
+
+templ AppSupportThread(d AppThreadData) {
+	<div class="screen">
+		@subHeader("Обращение " + ticketNumber(d.Ticket.ID), supportTopicLabel(d.Ticket.Topic), "/app/support") {
+			<span class={ supportStatusClass(d.Ticket.Status) }>{ supportStatusLabel(d.Ticket.Status) }</span>
+		}
+		@notices("", d.Error)
+		<div class="thread">
+			for _, m := range d.Messages {
+				<div class={ "msg", templ.KV("msg-mine", !m.FromTeam) }>
+					if m.FromTeam {
+						<b class="msg-who">Поддержка Uslugi</b>
+					}
+					<div class="msg-bubble">{ m.Text }</div>
+					<span class="msg-time">{ msgTime(m.CreatedAt) }</span>
+				</div>
+			}
+			if d.Ticket.Status == "answered" {
+				<div class="solved">
+					<b>Вопрос решён?</b>
+					<div class="row-gap">
+						<button type="button" class="btn btn-dark btn-sm" hx-post={ ticketPath(d.Ticket.ID) + "/close" } hx-target="#app">Да, закрыть</button>
+					</div>
+				</div>
+			}
+			if d.Ticket.Status == "closed" {
+				<p class="hint hint-center">Обращение закрыто. Если нужно — напишите новое или ответьте здесь, и мы откроем его снова.</p>
+			}
+		</div>
+		<form class="composer" hx-post={ ticketPath(d.Ticket.ID) } hx-target="#app">
+			<label class="composer-field">
+				<input type="text" name="text" placeholder="Написать ещё…" aria-label="Сообщение" maxlength="2000" required/>
+			</label>
+			<button type="submit" class="btn btn-red btn-icon" aria-label="Отправить">
+				@icon("send", 20)
+			</button>
+		</form>
+	</div>
+}
+
+func msgTime(t time.Time) string {
+	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err == nil {
+		t = t.In(loc)
+	}
+	return dateRu(t.Day(), int(t.Month())) + ", " + t.Format("15:04")
+}
+
+func roundRating(v float64) int { return int(v + 0.5) }

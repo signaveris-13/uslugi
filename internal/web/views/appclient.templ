@@ -368,6 +368,7 @@ templ AppListing(d AppListingData) {
 				}
 			</dl>
 		</section>
+		@listingReviews(l, d.Summary, d.Reviews, d.ViewerID, d.CanReview)
 		<p class="hint hint-pad">Uslugi — площадка, а не сторона сделки. Договаривайтесь с мастером напрямую.</p>
 		if !d.Own {
 			<button type="button" class="link-btn link-pad" hx-get={ complaintPath(l.ID) } hx-target="#app">Пожаловаться на объявление</button>
@@ -530,6 +531,16 @@ templ AppProfile(d AppProfileData) {
 				</section>
 			}
 			<section class="card menu">
+				if d.IsProvider {
+					<button type="button" class="menu-row" hx-get="/app/reviews" hx-target="#app">
+						<span class="menu-ico">
+							@icon("star", 20)
+						</span>
+						<span class="grow">Отзывы обо мне</span>
+						<span class="muted">{ avgText(d.Reviews) } · { countLabel(d.Reviews.Count) }</span>
+						@icon("right", 18)
+					</button>
+				}
 				<button type="button" class="menu-row" hx-get="/app/support" hx-target="#app">
 					<span class="menu-ico">
 						@icon("help", 20)

@@ -1,0 +1,285 @@
+package views
+
+import "github.com/signaveris-13/uslugi/internal/store"
+
+type AdminReviewsData struct {
+	Page
+	Queue    []store.ReviewQueueItem
+	Selected *store.ReviewQueueItem
+	Checks   store.ReviewChecks
+	Error    string
+	Notice   string
+}
+
+type AdminSupportData struct {
+	Page
+	Tickets []store.SupportTicket
+	Status  string
+}
+
+type AdminTicketData struct {
+	Page
+	Ticket   store.SupportTicket
+	Messages []store.SupportMessage
+	Error    string
+	Notice   string
+}
+
+func queueKindLabel(k string) string {
+	switch k {
+	case "reply":
+		return "Ответ мастера"
+	case "dispute":
+		return "Спор"
+	}
+	return "Отзыв"
+}
+
+func reviewRejectReasons() []string { return store.ReviewRejectReasons }
+
+func reviewURL(i int64) templ.SafeURL { return templ.URL("/reviews?id=" + id(i)) }
+
+func ticketURL(i int64) templ.SafeURL { return templ.URL("/support/" + id(i)) }
+
+func supportBadge(s string) string {
+	switch s {
+	case "open":
+		return "badge badge-new"
+	case "answered":
+		return "badge badge-done"
+	}
+	return "badge badge-off"
+}
+
+templ ReviewsPage(d AdminReviewsData) {
+	@Layout(d.Page) {
+		<div class="page-head">
+			<h1>Отзывы на проверке</h1>
+			<p class="muted">{ countLabel(len(d.Queue)) } в очереди · старые сверху. Отзыв может оставить только тот, кто писал мастеру через Uslugi.</p>
+		</div>
+		if d.Error != "" {
+			<p class="flash flash-error">{ d.Error }</p>
+		}
+		if d.Notice != "" {
+			<p class="flash">{ d.Notice }</p>
+		}
+		if len(d.Queue) == 0 {
+			<p class="empty">Очередь пуста — всё проверено.</p>
+		} else {
+			<div class="lead-layout review-layout">
+				<div class="queue">
+					for _, q := range d.Queue {
+						<a href={ reviewURL(q.ID) } class={ "queue-item", templ.KV("active", d.Selected != nil && d.Selected.ID == q.ID && d.Selected.Kind == q.Kind) }>
+							<span class="queue-top">
+								<span class={ "badge", templ.KV("badge-new", q.Kind == "review") }>{ queueKindLabel(q.Kind) }</span>
+								<span class="muted">{ countLabel(q.Rating) } ★ · { formatTime(q.CreatedAt, d.TZ) }</span>
+							</span>
+							<b>{ titleOr(q.ListingTitle) } · { q.ProviderName }</b>
+						</a>
+					}
+				</div>
+				if d.Selected != nil {
+					@reviewDecision(d)
+				}
+			</div>
+		}
+	}
+}
+
+templ reviewDecision(d AdminReviewsData) {
+	{{ q := *d.Selected }}
+	<section class="panel">
+		<h2>{ queueKindLabel(q.Kind) } · { titleOr(q.ListingTitle) }</h2>
+		<dl class="facts">
+			<dt>Автор</dt>
+			<dd>
+				{ deref(q.AuthorName) }
+				if q.AuthorUsername != nil {
+					<a href={ telegramURL(*q.AuthorUsername) } target="_blank" rel="noopener">{ "@" + *q.AuthorUsername }</a>
+				}
+				if !q.ShowName {
+					<span class="muted">· подписан «Клиент Uslugi»</span>
+				}
+			</dd>
+			<dt>Мастер</dt>
+			<dd><a href={ listingURL(q.ListingID) }>{ q.ProviderName } · { titleOr(q.ListingTitle) }</a></dd>
+			<dt>Оценка</dt>
+			<dd><b>{ countLabel(q.Rating) } из 5</b></dd>
+			if len(q.Tags) > 0 {
+				<dt>Понравилось</dt>
+				<dd>{ joinTags(q.Tags) }</dd>
+			}
+			<dt>Отзыв</dt>
+			<dd class="pre">{ deref(q.Text) }</dd>
+			if q.Kind == "reply" {
+				<dt>Ответ мастера</dt>
+				<dd class="pre"><b>{ deref(q.ReplyText) }</b></dd>
+			}
+			if q.Kind == "dispute" {
+				<dt>Мастер оспаривает</dt>
+				<dd class="pre"><b>{ deref(q.DisputeReason) }</b></dd>
+			}
+		</dl>
+		<div class="checks">
+			<b>Проверки</b>
+			if d.Checks.ContactedAt != nil {
+				<span class="check-ok">✓ Писал мастеру через Uslugi { formatTime(*d.Checks.ContactedAt, d.TZ) }</span>
+			} else {
+				<span class="check-warn">! Нет записи о контакте с мастером</span>
+			}
+			if d.Checks.HasLinksOrPhones {
+				<span class="check-warn">! Похоже на ссылку, @username или номер телефона</span>
+			} else {
+				<span class="check-ok">✓ Нет ссылок и телефонов</span>
+			}
+			if d.Checks.AuthorReviews <= 1 {
+				<span class="check-ok">✓ Первый отзыв с этого аккаунта</span>
+			} else {
+				<span class="muted">Отзывов с аккаунта: { countLabel(d.Checks.AuthorReviews) }</span>
+			}
+			if d.Checks.ProviderLast24h >= 3 {
+				<span class="check-warn">! О мастере { countLabel(d.Checks.ProviderLast24h) } отзыва за сутки — проверьте, нет ли накрутки</span>
+			}
+		</div>
+		<form method="post" action={ templ.SafeURL("/reviews/" + id(q.ID) + "/decide") } hx-boost="false" class="decide">
+			<input type="hidden" name="kind" value={ q.Kind }/>
+			switch q.Kind {
+				case "dispute":
+					<button type="submit" name="approve" value="1" class="button big wide">Спор обоснован — снять отзыв</button>
+					<button type="submit" name="approve" value="0" class="button secondary wide">Отзыв остаётся</button>
+				default:
+					<button type="submit" name="approve" value="1" class="button big wide">✅ Опубликовать</button>
+					<label>
+						Причина отказа
+						<select name="reason">
+							<option value="">Своими словами ↓</option>
+							for _, r := range reviewRejectReasons() {
+								<option value={ r }>{ r }</option>
+							}
+						</select>
+					</label>
+					<label>
+						Комментарий для автора
+						<textarea name="comment" rows="2" placeholder="Что исправить"></textarea>
+					</label>
+					<button type="submit" name="approve" value="0" class="button secondary wide">Отклонить</button>
+			}
+		</form>
+		<p class="hint">Автору придёт уведомление в бот. Отклонённый отзыв автор может исправить и отправить снова.</p>
+	</section>
+}
+
+templ SupportPage(d AdminSupportData) {
+	@Layout(d.Page) {
+		<div class="page-head">
+			<h1>Поддержка</h1>
+		</div>
+		<nav class="tabs">
+			<a href="/support" class={ templ.KV("active", d.Status == "open") }>
+				Ждут ответа
+				if d.SupportCount > 0 {
+					<span class="tab-count">{ countLabel(d.SupportCount) }</span>
+				}
+			</a>
+			<a href="/support?status=answered" class={ templ.KV("active", d.Status == "answered") }>Ответили</a>
+			<a href="/support?status=all" class={ templ.KV("active", d.Status == "") }>Все</a>
+		</nav>
+		if len(d.Tickets) == 0 {
+			<p class="empty">Обращений нет.</p>
+		} else {
+			<table class="leads">
+				<thead>
+					<tr><th>№</th><th>Тема</th><th>Сообщение</th><th>Кто</th><th>Статус</th><th>Обновлено</th></tr>
+				</thead>
+				<tbody>
+					for _, t := range d.Tickets {
+						<tr>
+							<td><a href={ ticketURL(t.ID) }>{ "№" + id(t.ID) }</a></td>
+							<td>{ supportTopicLabel(t.Topic) }</td>
+							<td class="clip"><a href={ ticketURL(t.ID) }>{ t.FirstText }</a></td>
+							<td class="contacts">
+								<span class="strong">{ deref(t.UserName) }</span>
+								if t.Username != nil {
+									<a href={ telegramURL(*t.Username) } target="_blank" rel="noopener">{ "@" + *t.Username }</a>
+								}
+							</td>
+							<td><span class={ supportBadge(t.Status) }>{ supportStatusLabel(t.Status) }</span></td>
+							<td class="muted">{ formatTime(t.UpdatedAt, d.TZ) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	}
+}
+
+templ SupportTicketPage(d AdminTicketData) {
+	@Layout(d.Page) {
+		{{ t := d.Ticket }}
+		<div class="page-head">
+			<p class="muted"><a href="/support">← Поддержка</a></p>
+			<h1>
+				{ "Обращение №" + id(t.ID) }
+				<span class={ supportBadge(t.Status) }>{ supportStatusLabel(t.Status) }</span>
+			</h1>
+			<p class="muted">{ supportTopicLabel(t.Topic) } · создано { formatTime(t.CreatedAt, d.TZ) }</p>
+		</div>
+		if d.Error != "" {
+			<p class="flash flash-error">{ d.Error }</p>
+		}
+		if d.Notice != "" {
+			<p class="flash">{ d.Notice }</p>
+		}
+		<div class="lead-layout">
+			<section class="panel">
+				<h2>Переписка</h2>
+				<ol class="history">
+					for _, m := range d.Messages {
+						<li class={ templ.KV("from-team", m.FromTeam) }>
+							<div>
+								<b>
+									if m.FromTeam {
+										{ "Поддержка · " + deref(m.AuthorName) }
+									} else {
+										{ deref(t.UserName) }
+									}
+								</b>
+								<span class="muted">{ formatTime(m.CreatedAt, d.TZ) }</span>
+							</div>
+							<div class="pre">{ m.Text }</div>
+						</li>
+					}
+				</ol>
+				<form method="post" action={ templ.SafeURL("/support/" + id(t.ID) + "/answer") } hx-boost="false" class="decide">
+					<label>
+						Ответ
+						<textarea name="text" rows="4" required placeholder="Ответ придёт пользователю в бот и в приложение"></textarea>
+					</label>
+					<button type="submit" class="button big wide">Ответить</button>
+				</form>
+			</section>
+			<aside class="lead-side">
+				<section class="panel">
+					<h2>Кто пишет</h2>
+					<dl class="facts">
+						<dt>Имя</dt>
+						<dd>{ deref(t.UserName) }</dd>
+						if t.Username != nil {
+							<dt>Telegram</dt>
+							<dd><a href={ telegramURL(*t.Username) } target="_blank" rel="noopener">{ "@" + *t.Username }</a></dd>
+						}
+						if t.ListingID != nil {
+							<dt>Объявление</dt>
+							<dd><a href={ listingURL(*t.ListingID) }>{ titleOr(t.ListingTitle) }</a></dd>
+						}
+					</dl>
+				</section>
+				if t.Status != "closed" {
+					<form method="post" action={ templ.SafeURL("/support/" + id(t.ID) + "/close") } hx-boost="false">
+						<button type="submit" class="button secondary wide">Закрыть обращение</button>
+					</form>
+				}
+			</aside>
+		</div>
+	}
+}

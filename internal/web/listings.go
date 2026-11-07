@@ -262,6 +262,12 @@ func redirectBack(w http.ResponseWriter, r *http.Request, msg string) {
 
 // notify пишет исполнителю в бот. Возвращает false, если не получилось.
 func (s *Server) notify(r *http.Request, chatID int64, text string) bool {
+	return s.notifyScreen(r, chatID, text, "📋 Мои объявления", "my")
+}
+
+// notifyScreen — уведомление с кнопкой, которая открывает экран Mini App (my, l_12, reviews, support_5).
+// Без https-адреса кнопка ведёт в «Мои объявления» бота.
+func (s *Server) notifyScreen(r *http.Request, chatID int64, text, buttonText, screen string) bool {
 	if s.tg == nil {
 		s.log.Warn("Telegram не настроен — уведомление не отправлено", "chat_id", chatID)
 		return false
@@ -270,9 +276,11 @@ func (s *Server) notify(r *http.Request, chatID int64, text string) bool {
 	defer cancel()
 	button := "m:mine"
 	if s.publicURL != "" {
-		button = s.publicURL + "/app?s=my"
+		button = s.publicURL + "/app?s=" + screen
+	} else {
+		buttonText = "📋 Мои объявления"
 	}
-	if err := s.tg.Notify(ctx, chatID, text, "📋 Мои объявления", button); err != nil {
+	if err := s.tg.Notify(ctx, chatID, text, buttonText, button); err != nil {
 		s.log.Warn("уведомление исполнителю", "err", err, "chat_id", chatID)
 		return false
 	}

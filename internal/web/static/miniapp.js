@@ -72,6 +72,8 @@
     if (p === "my") return "/app/my";
     if (p === "profile") return "/app/profile";
     if (p === "support") return "/app/support";
+    if (p === "reviews") return "/app/reviews";
+    if ((m = /^support_(\d+)$/.exec(p))) return "/app/support/" + m[1];
     var legacy = qs.get("listing");
     if (legacy && /^\d+$/.test(legacy)) return "/app/listings/" + legacy;
     return "/app/home";
@@ -187,7 +189,7 @@
 
   // Enter в однострочном поле не отправляет форму — только прячет клавиатуру.
   document.body.addEventListener("keydown", function (ev) {
-    if (ev.key === "Enter" && ev.target.matches("form input:not([type=checkbox]):not([type=radio]):not([type=search])")) {
+    if (ev.key === "Enter" && !ev.target.closest(".composer") && ev.target.matches("form input:not([type=checkbox]):not([type=radio]):not([type=search])")) {
       ev.preventDefault();
       ev.target.blur();
     }
