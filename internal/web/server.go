@@ -32,6 +32,7 @@ type Server struct {
 	devLogin    bool   // локально: вход в Mini App без Telegram
 	botUsername string
 	publicURL   string // https-адрес: кнопки уведомлений открывают Mini App
+	envLabel    string // «Stage» или «Local»; у прода пусто
 	secure      bool   // cookie только по HTTPS (всё, кроме локального запуска)
 	tz          *time.Location
 }
@@ -43,6 +44,7 @@ type Options struct {
 	DevLogin     bool
 	BotUsername  string
 	PublicURL    string
+	EnvLabel     string
 	SecureCookie bool
 	TimeZone     *time.Location
 }
@@ -58,7 +60,7 @@ func New(s *store.Store, log *slog.Logger, opt Options) *Server {
 	}
 	srv := &Server{store: s, log: log, tg: opt.Telegram, media: opt.Media, botToken: opt.BotToken,
 		appSecret: secret[:], devLogin: opt.DevLogin,
-		botUsername: opt.BotUsername, secure: opt.SecureCookie, tz: tz}
+		botUsername: opt.BotUsername, secure: opt.SecureCookie, tz: tz, envLabel: opt.EnvLabel}
 	if strings.HasPrefix(opt.PublicURL, "https://") {
 		srv.publicURL = strings.TrimSuffix(opt.PublicURL, "/")
 	}
@@ -145,7 +147,7 @@ func (s *Server) page(r *http.Request, me store.TeamMember, title, nav string) v
 		s.log.Warn("поддержка", "err", err)
 	}
 	return views.Page{Title: title, Me: me, Nav: nav, TZ: s.tz, QueueCount: n, ComplaintCount: c, RevisionCount: rv,
-		ReviewCount: rc, SupportCount: sc}
+		ReviewCount: rc, SupportCount: sc, Env: s.envLabel}
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, c templ.Component) {

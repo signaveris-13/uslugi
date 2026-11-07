@@ -3,7 +3,7 @@ package views
 import "github.com/signaveris-13/uslugi/internal/store"
 
 // AppShell — страница, которую открывает Telegram. Экраны подгружаются в #app.
-templ AppShell(devLogin bool) {
+templ AppShell(devLogin bool, env string) {
 	<!DOCTYPE html>
 	<html lang="ru">
 		<head>
@@ -17,6 +17,9 @@ templ AppShell(devLogin bool) {
 			<script src="/static/miniapp.js" defer></script>
 		</head>
 		<body>
+			if env != "" {
+				<div class="env-strip">{ env } · тестовый стенд</div>
+			}
 			<main id="app">
 				<div class="loading">
 					<span class="logo">Uslugi<span class="dot">.</span></span>

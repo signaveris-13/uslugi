@@ -91,6 +91,7 @@ func main() {
 			DevLogin:     cfg.IsLocal(), // локально Mini App открывается в браузере без Telegram
 			BotUsername:  botUsername,
 			PublicURL:    cfg.PublicURL,
+			EnvLabel:     cfg.Label(),
 			SecureCookie: !cfg.IsLocal(),
 			TimeZone:     tz,
 		}).Routes(),

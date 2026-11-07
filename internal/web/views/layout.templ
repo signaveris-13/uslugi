@@ -19,6 +19,9 @@ templ Layout(p Page) {
 		<body hx-boost="true">
 			<header class="topbar">
 				@brand("CRM")
+				if p.Env != "" {
+					<span class="env-badge" title="Это не прод: данные и бот тестовые">{ p.Env }</span>
+				}
 				<nav>
 					<a href="/leads" class={ templ.KV("active", p.Nav == "list") }>Лиды</a>
 					<a href="/leads/board" class={ templ.KV("active", p.Nav == "board") }>Канбан</a>

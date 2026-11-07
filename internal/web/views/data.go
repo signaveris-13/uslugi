@@ -19,11 +19,12 @@ type Page struct {
 	Me             store.TeamMember
 	Nav            string // "list", "board", "new", "listings"
 	TZ             *time.Location
-	QueueCount     int // объявлений ждут модерации
-	ComplaintCount int // новых жалоб
-	RevisionCount  int // правок опубликованных объявлений ждут проверки
-	ReviewCount    int // отзывы, ответы и споры на модерации
-	SupportCount   int // обращения ждут ответа
+	QueueCount     int    // объявлений ждут модерации
+	ComplaintCount int    // новых жалоб
+	RevisionCount  int    // правок опубликованных объявлений ждут проверки
+	ReviewCount    int    // отзывы, ответы и споры на модерации
+	SupportCount   int    // обращения ждут ответа
+	Env            string // «Stage» на тестовом стенде; у прода пусто
 }
 
 // AttentionCount — сколько всего ждёт модератора: бейдж в меню.

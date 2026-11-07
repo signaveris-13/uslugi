@@ -37,6 +37,9 @@ if [ ! -f "$ENV_FILE" ]; then
   DEFAULT_DOMAIN=""
   [ -n "$IP" ] && DEFAULT_DOMAIN="${IP//./-}.sslip.io"
 
+  read -r -p "Окружение: staging или production [production]: " APP_ENV
+  APP_ENV=${APP_ENV:-production}
+  case "$APP_ENV" in staging|production) ;; *) echo "Нужно staging или production" >&2; exit 1 ;; esac
   read -r -p "Адрес админки [$DEFAULT_DOMAIN]: " DOMAIN
   DOMAIN=${DOMAIN:-$DEFAULT_DOMAIN}
   read -r -p "Токен бота от @BotFather: " BOT_TOKEN
@@ -44,6 +47,7 @@ if [ ! -f "$ENV_FILE" ]; then
 
   umask 077
   cat > "$ENV_FILE" <<EOF
+APP_ENV=$APP_ENV
 DOMAIN=$DOMAIN
 POSTGRES_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
 BOT_TOKEN=$BOT_TOKEN

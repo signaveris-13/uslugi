@@ -59,6 +59,19 @@ func (c Config) IsLocal() bool {
 	return c.Env == "local"
 }
 
+// Label — короткая подпись окружения для бейджа; у прода пусто.
+func (c Config) Label() string {
+	switch c.Env {
+	case "production":
+		return ""
+	case "staging":
+		return "Stage"
+	case "local":
+		return "Local"
+	}
+	return c.Env
+}
+
 // RequireDB проверяет, что задана строка подключения к базе.
 func (c Config) RequireDB() error {
 	if c.DatabaseURL == "" {

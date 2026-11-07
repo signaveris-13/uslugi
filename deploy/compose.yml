@@ -7,7 +7,8 @@ x-app: &app
   image: uslugi:latest
   restart: unless-stopped
   environment:
-    APP_ENV: production
+    # staging — тестовый стенд (бейдж «Stage» в админке и приложении), production — прод.
+    APP_ENV: ${APP_ENV:-production}
     DATABASE_URL: postgres://uslugi:${POSTGRES_PASSWORD}@postgres:5432/uslugi?sslmode=disable
     BOT_TOKEN: ${BOT_TOKEN}
     BOT_USERNAME: ${BOT_USERNAME:-}

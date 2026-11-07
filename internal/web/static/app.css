@@ -256,3 +256,4 @@ body.login { display: grid; place-items: center; min-height: 100vh; }
 .decide label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 700; color: var(--muted); }
 .history li.from-team { background: var(--bg); border-radius: 12px; padding: 10px 12px; }
 td.clip { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.env-badge { height: 26px; padding: 0 10px; border-radius: 8px; background: #FFF4DC; color: #7A5200; font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; display: inline-flex; align-items: center; }

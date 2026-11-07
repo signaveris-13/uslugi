@@ -37,7 +37,7 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 
 func (s *Server) appShell(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	s.render(w, r, http.StatusOK, views.AppShell(s.devLogin))
+	s.render(w, r, http.StatusOK, views.AppShell(s.devLogin, s.envLabel))
 }
 
 // appAuth меняет initData от Telegram на токен приложения.
