@@ -2,21 +2,31 @@ package views
 
 import "github.com/signaveris-13/uslugi/internal/store"
 
+templ listingsTabs(p Page, active string) {
+	<nav class="tabs">
+		for _, t := range listingTabs {
+			<a href={ tabURL(t.Status) } class={ templ.KV("active", active == t.Status) }>
+				{ t.Label }
+				if t.Status == store.ListingModeration && p.QueueCount > 0 {
+					<span class="tab-count">{ countLabel(p.QueueCount) }</span>
+				}
+			</a>
+		}
+		<a href="/complaints" class={ templ.KV("active", active == "complaints") }>
+			Жалобы
+			if p.ComplaintCount > 0 {
+				<span class="tab-count">{ countLabel(p.ComplaintCount) }</span>
+			}
+		</a>
+	</nav>
+}
+
 templ ListingsPage(d ListingsData) {
 	@Layout(d.Page) {
 		<div class="page-head">
 			<h1>Объявления</h1>
 		</div>
-		<nav class="tabs">
-			for _, t := range listingTabs {
-				<a href={ tabURL(t.Status) } class={ templ.KV("active", d.Filter.Status == t.Status) }>
-					{ t.Label }
-					if t.Status == store.ListingModeration && d.QueueCount > 0 {
-						<span class="tab-count">{ countLabel(d.QueueCount) }</span>
-					}
-				</a>
-			}
-		</nav>
+		@listingsTabs(d.Page, d.Filter.Status)
 		<div id="results">
 			if len(d.Rows) == 0 {
 				if d.Filter.Status == store.ListingModeration {
@@ -147,6 +157,7 @@ templ ListingPage(d ListingData) {
 				</section>
 			</div>
 			<aside class="lead-side">
+				@complaintsPanel(d)
 				@moderationPanel(d)
 				@providerPanel(d)
 				if len(d.Duplicates) > 0 {
@@ -272,4 +283,81 @@ templ providerPanel(d ListingData) {
 			</details>
 		}
 	</section>
+}
+
+templ complaintsPanel(d ListingData) {
+	if len(d.Complaints) > 0 {
+		<section class="panel panel-warn">
+			<h2>Жалобы · { countLabel(len(d.Complaints)) }</h2>
+			<ol class="history">
+				for _, c := range d.Complaints {
+					<li>
+						<div><b>{ complaintReason(c.Reason) }</b> <span class={ complaintStatusClass(c.Status) }>{ complaintStatusLabel(c.Status) }</span></div>
+						<div class="muted">{ deref(c.Reporter) } · { formatTime(c.CreatedAt, d.TZ) }</div>
+						if c.Comment != nil {
+							<div class="pre">{ *c.Comment }</div>
+						}
+						if c.Resolution != nil {
+							<div class="muted">Решение: { *c.Resolution }</div>
+						}
+						if c.Status == "new" {
+							@complaintActions(c, string(listingURL(d.Listing.ID)))
+						}
+					</li>
+				}
+			</ol>
+		</section>
+	}
+}
+
+templ complaintActions(c store.Complaint, back string) {
+	<form class="complaint-form" method="post" action={ templ.SafeURL("/complaints/" + id(c.ID) + "/resolve") } hx-boost="false">
+		<input type="hidden" name="back" value={ back }/>
+		<input name="resolution" placeholder="Что сделали (необязательно)"/>
+		<div class="row">
+			<button type="submit" name="status" value="resolved" class="button">Меры приняты</button>
+			<button type="submit" name="status" value="dismissed" class="button secondary">Не подтвердилась</button>
+		</div>
+	</form>
+}
+
+templ ComplaintsPage(d ComplaintsData) {
+	@Layout(d.Page) {
+		<div class="page-head">
+			<h1>Объявления</h1>
+		</div>
+		@listingsTabs(d.Page, "complaints")
+		<nav class="tabs subtabs">
+			<a href="/complaints" class={ templ.KV("active", d.Status == "new") }>Новые</a>
+			<a href="/complaints?status=all" class={ templ.KV("active", d.Status == "") }>Все</a>
+		</nav>
+		if len(d.Complaints) == 0 {
+			<p class="empty">Жалоб нет.</p>
+		} else {
+			<table class="leads">
+				<thead>
+					<tr>
+						<th>Объявление</th>
+						<th>Причина</th>
+						<th>Комментарий</th>
+						<th>От кого</th>
+						<th>Статус</th>
+						<th>Когда</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, c := range d.Complaints {
+						<tr>
+							<td><a href={ listingURL(c.ListingID) }>{ titleOr(c.ListingTitle) }</a></td>
+							<td>{ complaintReason(c.Reason) }</td>
+							<td class="pre">{ deref(c.Comment) }</td>
+							<td>{ deref(c.Reporter) }</td>
+							<td><span class={ complaintStatusClass(c.Status) }>{ complaintStatusLabel(c.Status) }</span></td>
+							<td class="muted">{ formatTime(c.CreatedAt, d.TZ) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	}
 }

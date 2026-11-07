@@ -54,6 +54,11 @@ func main() {
 		os.Exit(1)
 	}
 	app.Register(b)
+	if me, err := b.GetMe(ctx); err == nil {
+		app.SetBotUsername(me.Username)
+	} else {
+		log.Warn("username бота", "err", err)
+	}
 
 	log.Info("бот запущен, жду сообщений", "env", cfg.Env)
 	b.Start(ctx) // long polling до Ctrl+C

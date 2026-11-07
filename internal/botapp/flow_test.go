@@ -106,6 +106,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	app.Register(b)
+	app.SetBotUsername("test_bot")
 
 	h := &harness{t: t, ctx: ctx, tg: tg, b: b, st: st, pool: pool,
 		user: models.User{ID: 8_000_000_000 + rand.Int64N(1_000_000_000), FirstName: "Анна", Username: fmt.Sprintf("anna_test_%d", rand.IntN(1e6))}}
@@ -428,4 +429,133 @@ func testLogOut() io.Writer {
 		return os.Stderr
 	}
 	return io.Discard
+}
+
+// publishedListing — объявление другого исполнителя, уже прошедшее модерацию.
+func (h *harness) publishedListing(title, subSlug string) int64 {
+	h.t.Helper()
+	ctx := h.ctx
+	tg := store.TelegramUser{ID: 7_500_000_000 + rand.Int64N(100_000_000), Username: fmt.Sprintf("master_%d", rand.IntN(1e6)), FirstName: "Мастер"}
+	u, _, err := h.st.UpsertBotUser(ctx, tg, "")
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := h.st.BootstrapTeam(ctx, []int64{tg.ID + 1}); err != nil {
+		h.t.Fatal(err)
+	}
+	m, _ := h.st.ActiveTeamMemberByTelegramID(ctx, tg.ID+1)
+	h.clean = append(h.clean, func() {
+		ctx := context.Background()
+		h.pool.Exec(ctx, `DELETE FROM complaint WHERE listing_id IN (SELECT l.id FROM listing l JOIN provider p ON p.id = l.provider_id WHERE p.user_id = $1)`, u.ID)
+		h.pool.Exec(ctx, `DELETE FROM event WHERE object_type = 'listing' AND object_id IN (SELECT l.id FROM listing l JOIN provider p ON p.id = l.provider_id WHERE p.user_id = $1)`, u.ID)
+		h.pool.Exec(ctx, `DELETE FROM listing WHERE provider_id IN (SELECT id FROM provider WHERE user_id = $1)`, u.ID)
+		h.pool.Exec(ctx, `DELETE FROM provider WHERE user_id = $1`, u.ID)
+		h.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, u.ID)
+		h.pool.Exec(ctx, `DELETE FROM audit_log WHERE actor_id = $1`, m.ID)
+		h.pool.Exec(ctx, `DELETE FROM team_member WHERE id = $1`, m.ID)
+	})
+	p, _ := h.st.EnsureProvider(ctx, u, "Мастер")
+	var catID, cityID int64
+	h.pool.QueryRow(ctx, `SELECT id FROM category WHERE slug = $1`, subSlug).Scan(&catID)
+	h.pool.QueryRow(ctx, `SELECT id FROM city WHERE slug = 'nha-trang'`).Scan(&cityID)
+	id, err := h.st.CreateListingDraft(ctx, p.ID, store.ListingDraftInput{
+		CategoryID: catID, CityID: cityID, Title: title, Description: "Описание услуги", Telegram: tg.Username,
+		WhatsApp: "+84 905 111 222", Currency: "VND",
+	})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.st.SetPriceType(ctx, id, "fixed")
+	h.st.SetPriceAmount(ctx, id, 300000)
+	if err := h.st.SubmitListing(ctx, id, p.ID); err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := h.st.ApproveListing(ctx, m.ID, id); err != nil {
+		h.t.Fatal(err)
+	}
+	return id
+}
+
+func (h *harness) events(typ string, listingID int64) int {
+	var n int
+	h.pool.QueryRow(h.ctx, `SELECT count(*) FROM event e JOIN users u ON u.id = e.user_id
+		WHERE u.telegram_id = $1 AND e.type = $2 AND e.object_id = $3`, h.user.ID, typ, listingID).Scan(&n)
+	return n
+}
+
+func (h *harness) lastCall() tgCall {
+	h.tg.mu.Lock()
+	defer h.tg.mu.Unlock()
+	return h.tg.calls[len(h.tg.calls)-1]
+}
+
+// Клиент: каталог → список → карточка → контакт, избранное, поделиться, жалоба; deep link.
+func TestClientFlow(t *testing.T) {
+	h := newHarness(t)
+	title := fmt.Sprintf("Брови и ресницы %d", rand.IntN(1e6))
+	id := h.publishedListing(title, "brows-lashes")
+
+	h.sendText("/start")
+	h.click("Нячанг")
+	h.click("Ищу услугу")
+	h.expectText("Каталог · Нячанг")
+	h.click("Красота")
+	// В «Красоте» могут быть объявления из других тестов: тогда сначала подкатегории.
+	if text := h.lastText(); strings.Contains(text, "Что именно ищешь?") {
+		h.click("Ресницы и брови")
+	}
+	h.expectText(title)
+	h.click(title)
+
+	h.expectText("<b>" + title + "</b>")
+	h.expectText("300 000 ₫")
+	if h.events("listing_viewed", id) != 1 {
+		t.Fatal("просмотр не записан")
+	}
+
+	h.click("Написать в Telegram")
+	h.expectText("Скажи, что нашёл объявление")
+	_, kb := h.lastMarkup()
+	if !strings.HasPrefix(kb[0][0].URL, "https://t.me/master_") {
+		t.Fatalf("ссылка на чат: %q", kb[0][0].URL)
+	}
+	if h.events("contact_clicked", id) != 1 {
+		t.Fatal("клик по контакту не записан")
+	}
+
+	// Возвращаемся к карточке по deep link и добавляем в избранное.
+	h.sendText(fmt.Sprintf("/start l_%d", id))
+	h.expectText("<b>" + title + "</b>")
+	h.click("В избранное")
+	h.expectButton("❤️ В избранном")
+	h.sendText("/menu")
+	h.click("Избранное")
+	h.expectButton(title)
+
+	h.sendText(fmt.Sprintf("/start l_%d", id))
+	h.click("Поделиться")
+	h.expectText(fmt.Sprintf("https://t.me/test_bot?start=l_%d", id))
+
+	h.sendText(fmt.Sprintf("/start l_%d", id))
+	h.click("WhatsApp")
+	_, kb = h.lastMarkup()
+	if kb[0][0].URL != "https://wa.me/84905111222" {
+		t.Fatalf("WhatsApp: %q", kb[0][0].URL)
+	}
+
+	h.sendText(fmt.Sprintf("/start l_%d", id))
+	h.click("Пожаловаться")
+	h.click("Неактуально")
+	h.sendText("Мастер уехал из города")
+	h.expectText("Жалоба ушла модератору")
+	var reason, comment string
+	if err := h.pool.QueryRow(h.ctx, `SELECT reason, comment FROM complaint WHERE listing_id = $1`, id).Scan(&reason, &comment); err != nil || reason != "outdated" || comment != "Мастер уехал из города" {
+		t.Fatalf("жалоба: %q %q %v", reason, comment, err)
+	}
+	// Повторная жалоба на то же объявление — не дублируем.
+	h.sendText(fmt.Sprintf("/start l_%d", id))
+	h.click("Пожаловаться")
+	h.click("Другое")
+	h.click("Отправить без комментария")
+	h.expectText("уже пожаловался")
 }

@@ -15,12 +15,16 @@ import (
 
 // Page — общие данные для каждой страницы админки.
 type Page struct {
-	Title      string
-	Me         store.TeamMember
-	Nav        string // "list", "board", "new", "listings"
-	TZ         *time.Location
-	QueueCount int // объявлений ждут модерации — бейдж в меню
+	Title          string
+	Me             store.TeamMember
+	Nav            string // "list", "board", "new", "listings"
+	TZ             *time.Location
+	QueueCount     int // объявлений ждут модерации
+	ComplaintCount int // новых жалоб
 }
+
+// AttentionCount — сколько всего ждёт модератора: бейдж в меню.
+func (p Page) AttentionCount() int { return p.QueueCount + p.ComplaintCount }
 
 type CategoryGroup struct {
 	Name  string
@@ -183,6 +187,7 @@ type ListingsData struct {
 
 type ListingData struct {
 	Page
+	Complaints []store.Complaint
 	Listing    store.Listing
 	Provider   store.ProviderInfo
 	Duplicates []store.ListingRow
@@ -291,8 +296,10 @@ func extrasText(l store.Listing) string {
 }
 
 var auditLabels = map[string]string{
-	"listing.approve": "Одобрено",
-	"listing.reject":  "Отклонено",
+	"listing.approve":     "Одобрено",
+	"listing.reject":      "Отклонено",
+	"complaint.resolved":  "Жалоба: меры приняты",
+	"complaint.dismissed": "Жалоба отклонена",
 }
 
 func auditLabel(a string) string {
@@ -309,4 +316,28 @@ func countBadge(n int) string {
 		return "99+"
 	}
 	return countLabel(n)
+}
+
+type ComplaintsData struct {
+	Page
+	Complaints []store.Complaint
+	Status     string
+}
+
+func complaintReason(r string) string {
+	if l, ok := store.ComplaintReasonLabels[r]; ok {
+		return l
+	}
+	return r
+}
+
+func complaintStatusLabel(s string) string {
+	return map[string]string{"new": "Новая", "resolved": "Меры приняты", "dismissed": "Отклонена"}[s]
+}
+
+func complaintStatusClass(s string) string {
+	if s == "new" {
+		return "badge badge-progress"
+	}
+	return "badge badge-off"
 }

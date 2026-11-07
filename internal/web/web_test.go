@@ -213,6 +213,35 @@ func TestModerationPages(t *testing.T) {
 		t.Fatalf("уведомление об отказе: %+v", n)
 	}
 
+	// Жалоба на опубликованное объявление видна модератору и закрывается.
+	var reporter int64
+	e.pool.QueryRow(e.ctx, `SELECT u.id FROM users u JOIN provider p ON p.user_id = u.id JOIN listing l ON l.provider_id = p.id WHERE l.id = $1`, b).Scan(&reporter)
+	if err := e.st.CreateComplaint(e.ctx, reporter, a, "wrong_contacts", "Телефон не отвечает"); err != nil {
+		t.Fatal(err)
+	}
+	e.t.Cleanup(func() { e.pool.Exec(context.Background(), `DELETE FROM complaint WHERE listing_id = $1`, a) })
+	code, body, _ = e.do("GET", "/complaints", nil)
+	if code != 200 || !strings.Contains(body, "Телефон не отвечает") {
+		t.Fatalf("жалобы: %d", code)
+	}
+	code, body, _ = e.do("GET", fmt.Sprintf("/listings/%d", a), nil)
+	if !strings.Contains(body, "Неверные контакты") || !strings.Contains(body, "Меры приняты") {
+		t.Fatalf("жалоба в карточке: %d", code)
+	}
+	var cid int64
+	e.pool.QueryRow(e.ctx, `SELECT id FROM complaint WHERE listing_id = $1`, a).Scan(&cid)
+	code, _, h = e.do("POST", fmt.Sprintf("/complaints/%d/resolve", cid), url.Values{
+		"status": {"dismissed"}, "resolution": {"Дозвонились"}, "back": {fmt.Sprintf("/listings/%d", a)},
+	})
+	if code != http.StatusSeeOther || !strings.HasPrefix(h.Get("Location"), fmt.Sprintf("/listings/%d", a)) {
+		t.Fatalf("закрыть жалобу: %d %s", code, h.Get("Location"))
+	}
+	var st string
+	e.pool.QueryRow(e.ctx, `SELECT status FROM complaint WHERE id = $1`, cid).Scan(&st)
+	if st != "dismissed" {
+		t.Fatalf("статус жалобы: %q", st)
+	}
+
 	// Фото отдаётся через прокси.
 	code, body, h = e.do("GET", "/media/tg/AgACAgIAAxkBAAIBc2VfakeFileId", nil)
 	if code != 200 || h.Get("Content-Type") != "image/jpeg" || !strings.Contains(body, "fake jpeg") {

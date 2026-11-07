@@ -74,6 +74,8 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /providers/{id}/block", auth(s.providerBlock))
 	mux.Handle("POST /providers/{id}/unblock", auth(s.providerUnblock))
 	mux.Handle("GET /media/tg/{fileID}", auth(s.telegramMedia))
+	mux.Handle("GET /complaints", auth(s.complaintsList))
+	mux.Handle("POST /complaints/{id}/resolve", auth(s.complaintResolve))
 
 	return securityHeaders(mux)
 }
@@ -93,7 +95,11 @@ func (s *Server) page(r *http.Request, me store.TeamMember, title, nav string) v
 	if err != nil {
 		s.log.Warn("очередь модерации", "err", err)
 	}
-	return views.Page{Title: title, Me: me, Nav: nav, TZ: s.tz, QueueCount: n}
+	c, err := s.store.CountNewComplaints(r.Context())
+	if err != nil {
+		s.log.Warn("жалобы", "err", err)
+	}
+	return views.Page{Title: title, Me: me, Nav: nav, TZ: s.tz, QueueCount: n, ComplaintCount: c}
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, c templ.Component) {

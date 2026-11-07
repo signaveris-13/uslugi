@@ -24,8 +24,8 @@ templ Layout(p Page) {
 					<a href="/leads/board" class={ templ.KV("active", p.Nav == "board") }>Канбан</a>
 					<a href="/listings" class={ templ.KV("active", p.Nav == "listings") }>
 						Объявления
-						if p.QueueCount > 0 {
-							<span class="nav-badge" title="Ждут модерации">{ countBadge(p.QueueCount) }</span>
+						if p.AttentionCount() > 0 {
+							<span class="nav-badge" title="Объявления на модерации и новые жалобы">{ countBadge(p.AttentionCount()) }</span>
 						}
 					</a>
 					<a href="/leads/new" class={ "button", templ.KV("active", p.Nav == "new") }>+ Новый лид</a>

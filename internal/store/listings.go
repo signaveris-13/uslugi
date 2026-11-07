@@ -64,6 +64,7 @@ type Listing struct {
 	RejectionReason  *string    `db:"rejection_reason"`
 	DraftStep        *string    `db:"draft_step"`
 	SubmittedAt      *time.Time `db:"submitted_at"`
+	PublishedAt      *time.Time `db:"published_at"`
 	CreatedAt        time.Time  `db:"created_at"`
 
 	// Заполняется GetListing.
@@ -75,7 +76,7 @@ type Listing struct {
 
 const listingCols = `id, provider_id, status, title, description, price_type, price_amount::float8 AS price_amount,
 	currency, travels_to_client, contact_telegram::text AS contact_telegram, contact_whatsapp, contact_phone,
-	contact_instagram, languages, schedule, rejection_reason, draft_step, submitted_at, created_at`
+	contact_instagram, languages, schedule, rejection_reason, draft_step, submitted_at, published_at, created_at`
 
 // ListingDraftInput — что известно заранее (из лида или из профиля Telegram).
 type ListingDraftInput struct {

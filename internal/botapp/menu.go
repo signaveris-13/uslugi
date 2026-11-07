@@ -48,7 +48,7 @@ func (a *App) onRoleChosen(t *turn, role string) {
 		a.startNewListing(t)
 		return
 	}
-	a.showMenu(t, "")
+	a.showCatalog(t)
 }
 
 func (a *App) showMenu(t *turn, prefix string) {
@@ -61,8 +61,8 @@ func (a *App) showMenu(t *turn, prefix string) {
 		text = prefix + "\n\n" + text
 	}
 	a.show(t, text, keyboard{
-		row(btn("🔍 Найти услугу", "m:find")),
-		row(btn("➕ Разместить объявление", "m:new")),
+		row(btn("🔍 Найти услугу", "c:cats")),
+		row(btn("⭐ Избранное", "c:favs"), btn("➕ Разместить", "m:new")),
 		row(btn("📋 Мои объявления", "m:mine"), btn("📍 Сменить город", "m:city")),
 	})
 }
@@ -70,10 +70,7 @@ func (a *App) showMenu(t *turn, prefix string) {
 func (a *App) onMenu(t *turn, item string) {
 	switch item {
 	case "find":
-		a.show(t, "Каталог скоро откроется: сейчас мы собираем первых мастеров. Если ты мастер — размести объявление, чтобы клиенты увидели тебя первыми.", keyboard{
-			row(btn("➕ Разместить объявление", "m:new")),
-			row(btn("← В меню", "m:menu")),
-		})
+		a.showCatalog(t)
 	case "new":
 		a.startNewListing(t)
 	case "mine":

@@ -18,8 +18,9 @@ import (
 )
 
 type App struct {
-	store *store.Store
-	log   *slog.Logger
+	store       *store.Store
+	log         *slog.Logger
+	botUsername string // для ссылок «Поделиться»
 
 	// Альбом приходит пачкой отдельных сообщений: на первое отвечаем,
 	// а на следующие обновляем тот же ответ со счётчиком фото.
@@ -35,6 +36,9 @@ type albumReply struct {
 func New(s *store.Store, log *slog.Logger) *App {
 	return &App{store: s, log: log, albums: map[string]albumReply{}}
 }
+
+// SetBotUsername — username бота без @, для deep link в «Поделиться».
+func (a *App) SetBotUsername(u string) { a.botUsername = strings.TrimPrefix(u, "@") }
 
 // Register подключает обработчики. Всё, что не /start и не вход, идёт в onUpdate.
 func (a *App) Register(b *bot.Bot) {
@@ -104,6 +108,9 @@ func (a *App) onStart(ctx context.Context, b *bot.Bot, u *models.Update) {
 		a.startFromInvite(t, token)
 		return
 	}
+	if a.startFromDeepLink(t, payload) {
+		return
+	}
 	if t.user.CityID == nil {
 		a.askCity(t, "Привет! Это Uslugi — каталог услуг русскоязычных мастеров.\n\nВ каком ты городе?")
 		return
@@ -161,6 +168,8 @@ func (a *App) onCallback(t *turn, data string) {
 		a.onMenu(t, arg)
 	case "f":
 		a.onForm(t, arg)
+	case "c":
+		a.onCatalog(t, arg)
 	default:
 		a.log.Warn("неизвестная кнопка", "data", data)
 	}
@@ -181,6 +190,10 @@ func (a *App) onMessage(t *turn, msg *models.Message) {
 		a.showMenu(t, "")
 		return
 	}
+	if text != "" && st.Step == stepComplaint {
+		a.onComplaintText(t, text)
+		return
+	}
 	if text != "" && st.ListingID != nil && isTextStep(st.Step) {
 		a.onFormText(t, st, text)
 		return
@@ -190,13 +203,17 @@ func (a *App) onMessage(t *turn, msg *models.Message) {
 
 // Отправка ------------------------------------------------------------------
 
-type keyboard [][]models.InlineKeyboardButton
+type (
+	btnT     = models.InlineKeyboardButton
+	keyboard [][]btnT
+)
 
-func btn(text, data string) models.InlineKeyboardButton {
-	return models.InlineKeyboardButton{Text: text, CallbackData: data}
-}
+func btn(text, data string) btnT { return btnT{Text: text, CallbackData: data} }
 
-func row(buttons ...models.InlineKeyboardButton) []models.InlineKeyboardButton { return buttons }
+// urlBtn — кнопка-ссылка: открывает чат, WhatsApp или профиль без участия бота.
+func urlBtn(text, u string) btnT { return btnT{Text: text, URL: u} }
+
+func row(buttons ...btnT) []btnT { return buttons }
 
 // show редактирует сообщение, на кнопку которого нажали, или отправляет новое.
 func (a *App) show(t *turn, text string, kb keyboard) {

@@ -27,6 +27,7 @@ var listingNotices = map[string]string{
 	"rejected":   "Объявление отклонено, исполнитель получил причину.",
 	"blocked":    "Исполнитель заблокирован, его объявления в архиве.",
 	"unblocked":  "Исполнитель разблокирован.",
+	"complaint":  "Жалоба закрыта.",
 	"approved_n": "Объявление опубликовано, но уведомить исполнителя не удалось.",
 	"rejected_n": "Объявление отклонено, но уведомить исполнителя не удалось.",
 }
@@ -80,9 +81,15 @@ func (s *Server) renderListing(w http.ResponseWriter, r *http.Request, me store.
 		s.fail(w, r, err)
 		return
 	}
+	complaints, err := s.store.ListingComplaints(ctx, l.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	s.render(w, r, status, views.ListingPage(views.ListingData{
 		Page: s.page(r, me, l.TitleOr(), "listings"), Listing: l, Provider: p, Duplicates: dups, History: hist,
-		Error: errText, Notice: listingNotices[r.URL.Query().Get("msg")],
+		Complaints: complaints,
+		Error:      errText, Notice: listingNotices[r.URL.Query().Get("msg")],
 	}))
 }
 
@@ -215,4 +222,28 @@ func (s *Server) telegramMedia(w http.ResponseWriter, r *http.Request, _ store.T
 		w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
 	}
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, 20<<20))
+}
+
+func (s *Server) complaintsList(w http.ResponseWriter, r *http.Request, me store.TeamMember) {
+	status := "new"
+	if r.URL.Query().Get("status") == "all" {
+		status = ""
+	}
+	list, err := s.store.ListComplaints(r.Context(), status)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.render(w, r, http.StatusOK, views.ComplaintsPage(views.ComplaintsData{
+		Page: s.page(r, me, "Жалобы", "listings"), Complaints: list, Status: status,
+	}))
+}
+
+func (s *Server) complaintResolve(w http.ResponseWriter, r *http.Request, me store.TeamMember) {
+	_, err := s.store.ResolveComplaint(r.Context(), me.ID, parseID(r.PathValue("id")), r.FormValue("status"), r.FormValue("resolution"))
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.fail(w, r, err)
+		return
+	}
+	redirectBack(w, r, "complaint")
 }
