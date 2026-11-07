@@ -3,8 +3,8 @@
 package tgclient
 
 import (
-	"strings"
 	"context"
+	"strings"
 	"time"
 
 	"github.com/go-telegram/bot"
