@@ -21,10 +21,11 @@ type Page struct {
 	TZ             *time.Location
 	QueueCount     int // объявлений ждут модерации
 	ComplaintCount int // новых жалоб
+	RevisionCount  int // правок опубликованных объявлений ждут проверки
 }
 
 // AttentionCount — сколько всего ждёт модератора: бейдж в меню.
-func (p Page) AttentionCount() int { return p.QueueCount + p.ComplaintCount }
+func (p Page) AttentionCount() int { return p.QueueCount + p.ComplaintCount + p.RevisionCount }
 
 type CategoryGroup struct {
 	Name  string
@@ -187,6 +188,8 @@ type ListingsData struct {
 
 type ListingData struct {
 	Page
+	Photos     []string // ссылки на фото: из Telegram или загруженные в приложении
+	Revision   *RevisionView
 	Complaints []store.Complaint
 	Listing    store.Listing
 	Provider   store.ProviderInfo
@@ -195,6 +198,21 @@ type ListingData struct {
 	Error      string
 	Notice     string
 }
+
+// RevisionView — правка опубликованного объявления: что поменялось.
+type RevisionView struct {
+	CreatedAt     time.Time
+	Changes       []FieldChange
+	PhotosChanged bool
+	NewPhotos     []string
+}
+
+type FieldChange struct {
+	Label, Old, New string
+}
+
+// StatusRevisions — вкладка «Правки» в списке объявлений.
+const StatusRevisions = "revisions"
 
 // Вкладки списка объявлений: статус → подпись.
 var listingTabs = []struct{ Status, Label string }{

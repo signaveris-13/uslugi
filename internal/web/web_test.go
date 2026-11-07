@@ -16,8 +16,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/signaveris-13/uslugi/internal/media"
 	"github.com/signaveris-13/uslugi/internal/store"
 )
+
+const testBotToken = "123456:TEST-token"
 
 type sentNotice struct {
 	ChatID int64
@@ -77,7 +80,13 @@ func newEnv(t *testing.T) *env {
 		w.Write([]byte("\xff\xd8\xff fake jpeg"))
 	}))
 	tg := &fakeTelegram{fileURL: img.URL + "/file.jpg"}
-	srv := httptest.NewServer(New(st, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{Telegram: tg, BotUsername: "test_bot"}).Routes())
+	ms, err := media.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(New(st, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{
+		Telegram: tg, BotUsername: "test_bot", Media: ms, BotToken: testBotToken,
+	}).Routes())
 
 	// Участник команды и сессия — как после входа через бота.
 	tgID := 9_100_000_000 + rand.Int64N(100_000_000)

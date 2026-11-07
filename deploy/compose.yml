@@ -14,6 +14,11 @@ x-app: &app
     TEAM_TELEGRAM_IDS: ${TEAM_TELEGRAM_IDS}
     ADMIN_TIMEZONE: ${ADMIN_TIMEZONE:-Asia/Ho_Chi_Minh}
     HTTP_ADDR: ":8080"
+    # Mini App открывается по https; фото из него лежат в общем томе web и bot.
+    PUBLIC_URL: https://${DOMAIN}
+    MEDIA_DIR: /data/media
+  volumes:
+    - media:/data/media
   depends_on:
     migrate:
       condition: service_completed_successfully
@@ -79,13 +84,16 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./backups:/backups
+      - media:/media:ro
     entrypoint:
       - /bin/sh
       - -c
       - |
         while true; do
           pg_dump -h postgres -U uslugi uslugi | gzip > /backups/uslugi-$$(date +%F).sql.gz
+          tar -czf /backups/media-$$(date +%F).tar.gz -C /media .
           find /backups -name 'uslugi-*.sql.gz' -mtime +30 -delete
+          find /backups -name 'media-*.tar.gz' -mtime +7 -delete
           sleep 86400
         done
     depends_on:
@@ -94,5 +102,6 @@ services:
 
 volumes:
   pgdata:
+  media:
   caddy_data:
   caddy_config:

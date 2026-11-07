@@ -14,6 +14,7 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
+	"github.com/signaveris-13/uslugi/internal/media"
 	"github.com/signaveris-13/uslugi/internal/store"
 )
 
@@ -21,6 +22,8 @@ type App struct {
 	store       *store.Store
 	log         *slog.Logger
 	botUsername string // для ссылок «Поделиться»
+	media       *media.Store
+	publicURL   string // https-адрес сервера: кнопки Mini App; пусто — без них
 
 	// Альбом приходит пачкой отдельных сообщений: на первое отвечаем,
 	// а на следующие обновляем тот же ответ со счётчиком фото.
@@ -35,6 +38,39 @@ type albumReply struct {
 
 func New(s *store.Store, log *slog.Logger) *App {
 	return &App{store: s, log: log, albums: map[string]albumReply{}}
+}
+
+// SetMedia — хранилище фото, загруженных через приложение.
+func (a *App) SetMedia(m *media.Store) { a.media = m }
+
+// SetPublicURL включает кнопки Mini App. Telegram открывает только https.
+func (a *App) SetPublicURL(u string) {
+	if strings.HasPrefix(u, "https://") {
+		a.publicURL = strings.TrimSuffix(u, "/")
+	}
+}
+
+// appURL — адрес Mini App; listingID > 0 — сразу открыть форму объявления.
+func (a *App) appURL(listingID int64) string {
+	if listingID > 0 {
+		return a.publicURL + "/app?listing=" + strconv.FormatInt(listingID, 10)
+	}
+	return a.publicURL + "/app"
+}
+
+func appBtn(text, u string) btnT { return btnT{Text: text, WebApp: &models.WebAppInfo{URL: u}} }
+
+// SetupMenuButton ставит кнопку «Объявления» слева от поля ввода — она открывает Mini App.
+func (a *App) SetupMenuButton(ctx context.Context, b *bot.Bot) {
+	if a.publicURL == "" {
+		return
+	}
+	_, err := b.SetChatMenuButton(ctx, &bot.SetChatMenuButtonParams{
+		MenuButton: models.MenuButtonWebApp{Type: models.MenuButtonTypeWebApp, Text: "Объявления", WebApp: models.WebAppInfo{URL: a.appURL(0)}},
+	})
+	if err != nil {
+		a.log.Warn("кнопка меню", "err", err)
+	}
 }
 
 // SetBotUsername — username бота без @, для deep link в «Поделиться».

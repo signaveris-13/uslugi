@@ -30,11 +30,25 @@ var listingNotices = map[string]string{
 	"complaint":  "Жалоба закрыта.",
 	"approved_n": "Объявление опубликовано, но уведомить исполнителя не удалось.",
 	"rejected_n": "Объявление отклонено, но уведомить исполнителя не удалось.",
+	"rev_ok":     "Правка одобрена, карточка в каталоге обновилась. Исполнитель получил уведомление.",
+	"rev_ok_n":   "Правка одобрена, но уведомить исполнителя не удалось.",
+	"rev_no":     "Правка отклонена, в каталоге осталась прежняя версия. Исполнитель получил причину.",
+	"rev_no_n":   "Правка отклонена, но уведомить исполнителя не удалось.",
 }
 
 func (s *Server) listingsList(w http.ResponseWriter, r *http.Request, me store.TeamMember) {
 	status := r.URL.Query().Get("status")
 	page := s.page(r, me, "Объявления", "listings")
+	if status == views.StatusRevisions || (status == "" && page.QueueCount == 0 && page.RevisionCount > 0) {
+		rows, err := s.store.ListRevisionListings(r.Context())
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		f := store.ListingFilter{Status: views.StatusRevisions}
+		s.render(w, r, http.StatusOK, views.ListingsPage(views.ListingsData{Page: page, Rows: rows, Filter: f}))
+		return
+	}
 	switch {
 	case status == "all":
 		status = ""
@@ -86,10 +100,33 @@ func (s *Server) renderListing(w http.ResponseWriter, r *http.Request, me store.
 		s.fail(w, r, err)
 		return
 	}
+	photos, err := s.store.ListingPhotoRows(ctx, l.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	var urls []string
+	for _, ph := range photos {
+		urls = append(urls, adminPhotoURL(store.SnapshotPhoto{StorageKey: deref(ph.StorageKey), TelegramFileID: deref(ph.TelegramFileID)}))
+	}
+	var rev *views.RevisionView
+	if l.Status == store.ListingPublished || l.Status == store.ListingPaused {
+		if pr, err := s.store.PendingRevision(ctx, l.ID); err == nil {
+			cur, err := s.store.CurrentSnapshot(ctx, l)
+			if err != nil {
+				s.fail(w, r, err)
+				return
+			}
+			rev = s.revisionView(ctx, cur, pr)
+		} else if !errors.Is(err, store.ErrNotFound) {
+			s.fail(w, r, err)
+			return
+		}
+	}
 	s.render(w, r, status, views.ListingPage(views.ListingData{
 		Page: s.page(r, me, l.TitleOr(), "listings"), Listing: l, Provider: p, Duplicates: dups, History: hist,
-		Complaints: complaints,
-		Error:      errText, Notice: listingNotices[r.URL.Query().Get("msg")],
+		Complaints: complaints, Photos: urls, Revision: rev,
+		Error: errText, Notice: listingNotices[r.URL.Query().Get("msg")],
 	}))
 }
 
@@ -144,6 +181,61 @@ func (s *Server) listingReject(w http.ResponseWriter, r *http.Request, me store.
 	http.Redirect(w, r, fmt.Sprintf("/listings/%d?msg=%s", id, msg), http.StatusSeeOther)
 }
 
+func (s *Server) revisionApprove(w http.ResponseWriter, r *http.Request, me store.TeamMember) {
+	id := parseID(r.PathValue("id"))
+	res, err := s.store.ApproveRevision(r.Context(), me.ID, id)
+	var ve store.ValidationError
+	switch {
+	case errors.As(err, &ve):
+		s.renderListing(w, r, me, id, ve.Msg, http.StatusUnprocessableEntity)
+		return
+	case errors.Is(err, store.ErrNotFound):
+		s.renderListing(w, r, me, id, "Правки на проверке уже нет — обнови страницу.", http.StatusConflict)
+		return
+	case err != nil:
+		s.fail(w, r, err)
+		return
+	}
+	msg := "rev_ok"
+	text := fmt.Sprintf("✅ Изменения в объявлении «%s» одобрены — клиенты уже видят новую версию.", html.EscapeString(res.Title))
+	if !s.notify(r, res.TelegramID, text) {
+		msg = "rev_ok_n"
+	}
+	http.Redirect(w, r, fmt.Sprintf("/listings/%d?msg=%s", id, msg), http.StatusSeeOther)
+}
+
+func (s *Server) revisionReject(w http.ResponseWriter, r *http.Request, me store.TeamMember) {
+	id := parseID(r.PathValue("id"))
+	reason := strings.TrimSpace(r.FormValue("reason"))
+	if c := strings.TrimSpace(r.FormValue("comment")); c != "" {
+		if reason != "" {
+			reason += ". " + c
+		} else {
+			reason = c
+		}
+	}
+	res, err := s.store.RejectRevision(r.Context(), me.ID, id, reason)
+	var ve store.ValidationError
+	switch {
+	case errors.As(err, &ve):
+		s.renderListing(w, r, me, id, ve.Msg, http.StatusUnprocessableEntity)
+		return
+	case errors.Is(err, store.ErrNotFound):
+		s.renderListing(w, r, me, id, "Правки на проверке уже нет — обнови страницу.", http.StatusConflict)
+		return
+	case err != nil:
+		s.fail(w, r, err)
+		return
+	}
+	msg := "rev_no"
+	text := fmt.Sprintf("⚠️ Изменения в объявлении «%s» не прошли модерацию.\n\n<b>Причина:</b> %s\n\nВ каталоге осталась прежняя версия. Поправь объявление и отправь снова.",
+		html.EscapeString(res.Title), html.EscapeString(reason))
+	if !s.notify(r, res.TelegramID, text) {
+		msg = "rev_no_n"
+	}
+	http.Redirect(w, r, fmt.Sprintf("/listings/%d?msg=%s", id, msg), http.StatusSeeOther)
+}
+
 func (s *Server) providerBlock(w http.ResponseWriter, r *http.Request, me store.TeamMember) {
 	if err := s.store.BlockProvider(r.Context(), me.ID, parseID(r.PathValue("id")), r.FormValue("reason")); err != nil {
 		s.fail(w, r, err)
@@ -188,7 +280,11 @@ var fileIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{10,200}$`)
 // telegramMedia отдаёт фото объявления, скачивая его у Telegram. Ссылка Telegram
 // содержит токен бота, поэтому браузер ходит сюда, а не туда напрямую.
 func (s *Server) telegramMedia(w http.ResponseWriter, r *http.Request, _ store.TeamMember) {
-	fileID := r.PathValue("fileID")
+	s.proxyTelegramFile(w, r, r.PathValue("fileID"))
+}
+
+// proxyTelegramFile отдаёт файл из Telegram через сервер: токен бота не уходит в браузер.
+func (s *Server) proxyTelegramFile(w http.ResponseWriter, r *http.Request, fileID string) {
 	if !fileIDRe.MatchString(fileID) || s.tg == nil {
 		http.NotFound(w, r)
 		return

@@ -320,8 +320,8 @@ func TestProviderFlow(t *testing.T) {
 	if l.PriceAmount == nil || *l.PriceAmount != 450000 || deref(l.PriceType) != "from" || deref(l.Currency) != "VND" {
 		t.Fatalf("цена: %v %v %v", l.PriceAmount, l.PriceType, l.Currency)
 	}
-	if len(l.PhotoFileIDs) != 2 || l.PhotoFileIDs[0] != "photo1" {
-		t.Fatalf("фото: %v", l.PhotoFileIDs)
+	if len(l.Photos) != 2 || l.Photos[0].TelegramFileID != "photo1" {
+		t.Fatalf("фото: %v", l.Photos)
 	}
 	if deref(l.ContactPhone) != "+84 905 123456" || deref(l.ContactTelegram) != h.user.Username {
 		t.Fatalf("контакты: тел %q, tg %q", deref(l.ContactPhone), deref(l.ContactTelegram))

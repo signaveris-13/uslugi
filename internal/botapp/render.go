@@ -3,8 +3,7 @@ package botapp
 import (
 	"fmt"
 	"html"
-	"regexp"
-	"strconv"
+	"os"
 	"strings"
 	"time"
 
@@ -114,7 +113,7 @@ func (a *App) render(f *form) {
 
 	case stepPhotos:
 		text := stepTitleText(6, "Фото") + fmt.Sprintf("Пришли до %d фото работ — с ними объявление смотрят чаще. Можно пропустить.", store.MaxPhotos)
-		if n := len(l.PhotoFileIDs); n > 0 {
+		if n := len(l.Photos); n > 0 {
 			text += fmt.Sprintf("\n\nСейчас фото: %d.", n)
 		}
 		a.show(f.turn, text, photosKeyboard(f))
@@ -249,7 +248,7 @@ func (a *App) renderCities(f *form, warn string) {
 }
 
 func photosKeyboard(f *form) keyboard {
-	n := len(f.listing.PhotoFileIDs)
+	n := len(f.listing.Photos)
 	var kb keyboard
 	if n > 0 {
 		kb = append(kb, row(btn(fmt.Sprintf("Готово, фото: %d →", n), "f:photos_done")))
@@ -379,22 +378,76 @@ func (a *App) renderEditMenu(f *form) {
 // sendCard показывает карточку: альбом фото (если есть) и текст с кнопками.
 func (a *App) sendCard(t *turn, l store.Listing, footer string, kb keyboard) {
 	text := cardText(l) + "\n\n" + footer
-	if len(l.PhotoFileIDs) == 0 {
+	if len(l.Photos) == 0 {
 		a.show(t, text, kb)
 		return
 	}
-	media := make([]models.InputMedia, 0, len(l.PhotoFileIDs))
-	for _, id := range l.PhotoFileIDs {
-		media = append(media, &models.InputMediaPhoto{Media: id})
-	}
-	if len(media) == 1 {
-		if _, err := t.b.SendPhoto(t.ctx, &bot.SendPhotoParams{ChatID: t.chatID, Photo: &models.InputFileString{Data: l.PhotoFileIDs[0]}}); err != nil {
-			a.log.Warn("send photo", "err", err)
-		}
-	} else if _, err := t.b.SendMediaGroup(t.ctx, &bot.SendMediaGroupParams{ChatID: t.chatID, Media: media}); err != nil {
-		a.log.Warn("send media group", "err", err)
-	}
+	a.sendPhotos(t, l.Photos)
 	a.send(t, text, kb)
+}
+
+// sendPhotos отправляет фото объявления. Фото из приложения (storage_key) загружаются
+// файлом один раз, дальше бот шлёт их по сохранённому file_id.
+func (a *App) sendPhotos(t *turn, photos []store.SnapshotPhoto) {
+	var files []*os.File
+	defer func() {
+		for _, f := range files {
+			f.Close()
+		}
+	}()
+	media := make([]models.InputMedia, 0, len(photos))
+	uploaded := map[int]string{} // номер в альбоме → storage_key фото, загруженного файлом
+	for i, p := range photos {
+		if p.TelegramFileID != "" {
+			media = append(media, &models.InputMediaPhoto{Media: p.TelegramFileID})
+			continue
+		}
+		if a.media == nil {
+			continue
+		}
+		f, err := a.media.Open(p.StorageKey)
+		if err != nil {
+			a.log.Warn("фото из хранилища", "err", err, "key", p.StorageKey)
+			continue
+		}
+		files = append(files, f)
+		name := fmt.Sprintf("p%d.jpg", i)
+		media = append(media, &models.InputMediaPhoto{Media: "attach://" + name, MediaAttachment: f})
+		uploaded[len(media)-1] = p.StorageKey
+	}
+	if len(media) == 0 {
+		return
+	}
+	var msgs []*models.Message
+	if len(media) == 1 {
+		mp := media[0].(*models.InputMediaPhoto)
+		var photo models.InputFile = &models.InputFileString{Data: mp.Media}
+		if mp.MediaAttachment != nil {
+			photo = &models.InputFileUpload{Filename: "photo.jpg", Data: mp.MediaAttachment}
+		}
+		m, err := t.b.SendPhoto(t.ctx, &bot.SendPhotoParams{ChatID: t.chatID, Photo: photo})
+		if err != nil {
+			a.log.Warn("send photo", "err", err)
+			return
+		}
+		msgs = []*models.Message{m}
+	} else {
+		var err error
+		if msgs, err = t.b.SendMediaGroup(t.ctx, &bot.SendMediaGroupParams{ChatID: t.chatID, Media: media}); err != nil {
+			a.log.Warn("send media group", "err", err)
+			return
+		}
+	}
+	// Запоминаем file_id загруженных фото, чтобы не загружать их снова.
+	for idx, key := range uploaded {
+		if idx >= len(msgs) || msgs[idx] == nil || len(msgs[idx].Photo) == 0 {
+			continue
+		}
+		sizes := msgs[idx].Photo
+		if err := a.store.CachePhotoFileID(t.ctx, key, sizes[len(sizes)-1].FileID); err != nil {
+			a.log.Warn("file_id фото", "err", err)
+		}
+	}
 }
 
 // cardText — текст карточки объявления (FR-B-04).
@@ -467,60 +520,7 @@ func priceText(l store.Listing) string { return l.PriceText() }
 
 func formatAmount(v float64, currency string) string { return store.FormatAmount(v, currency) }
 
-var thousandsRe = regexp.MustCompile(`^\d{1,3}([.,]\d{3})+$`)
+// parseAmount и normalizeContact — общие с Mini App, живут в store.
+func parseAmount(s string) (float64, bool) { return store.ParseAmount(s) }
 
-// parseAmount понимает «450000», «450 000», «450.000», «450к», «1,5 млн», «25.5».
-func parseAmount(s string) (float64, bool) {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = strings.NewReplacer(" ", "", " ", "", " ", "", "₫", "", "$", "", "vnd", "", "usd", "", "донгов", "", "донга", "").Replace(s)
-	mult := 1.0
-	for _, suf := range []struct {
-		s string
-		m float64
-	}{{"млн", 1e6}, {"kk", 1e6}, {"m", 1e6}, {"тыс", 1e3}, {"к", 1e3}, {"k", 1e3}} {
-		if strings.HasSuffix(s, suf.s) {
-			s = strings.TrimSuffix(s, suf.s)
-			mult = suf.m
-			break
-		}
-	}
-	if thousandsRe.MatchString(s) {
-		s = strings.NewReplacer(".", "", ",", "").Replace(s)
-	} else {
-		s = strings.Replace(s, ",", ".", 1)
-	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil || v <= 0 {
-		return 0, false
-	}
-	v *= mult
-	if v >= 1e12 {
-		return 0, false
-	}
-	return v, true
-}
-
-// normalizeContact приводит контакт к одному виду: телефоны без мусора, Instagram — ником.
-func normalizeContact(field, v string) string {
-	v = strings.TrimSpace(v)
-	switch field {
-	case "phone", "whatsapp":
-		var b strings.Builder
-		for i, r := range v {
-			if (r >= '0' && r <= '9') || (r == '+' && i == 0) || r == ' ' {
-				b.WriteRune(r)
-			}
-		}
-		return strings.Join(strings.Fields(b.String()), " ")
-	case "instagram":
-		for _, p := range []string{"https://", "http://", "www.", "instagram.com/", "@"} {
-			v = strings.TrimPrefix(v, p)
-		}
-		v = strings.TrimSuffix(v, "/")
-		if i := strings.IndexAny(v, "/?"); i >= 0 {
-			v = v[:i]
-		}
-		return v
-	}
-	return v
-}
+func normalizeContact(field, v string) string { return store.NormalizeContact(field, v) }

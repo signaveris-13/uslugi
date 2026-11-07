@@ -9,6 +9,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/ ./cmd/...
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata && adduser -D -H -u 10001 app
+RUN apk add --no-cache ca-certificates tzdata && adduser -D -H -u 10001 app \
+    && mkdir -p /data/media && chown app /data/media
 COPY --from=build /out/ /usr/local/bin/
 USER app

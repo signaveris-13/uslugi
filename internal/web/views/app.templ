@@ -1,0 +1,300 @@
+package views
+
+import "github.com/signaveris-13/uslugi/internal/store"
+
+// AppShell — страница, которую открывает Telegram. Экраны подгружаются в #app.
+templ AppShell(devLogin bool) {
+	<!DOCTYPE html>
+	<html lang="ru">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"/>
+			<title>Uslugi</title>
+			<link rel="preload" href="/static/fonts/manrope.woff2" as="font" type="font/woff2" crossorigin/>
+			<link rel="stylesheet" href="/static/miniapp.css"/>
+			<script src="https://telegram.org/js/telegram-web-app.js"></script>
+			<script src="/static/htmx.min.js"></script>
+			<script src="/static/miniapp.js" defer></script>
+		</head>
+		<body>
+			<main id="app">
+				<div class="loading">
+					<span class="logo">Uslugi<span class="dot">.</span></span>
+					<p class="muted" id="app-status">Загружаем…</p>
+				</div>
+				if devLogin {
+					<form id="dev-login" class="card dev" hidden>
+						<p class="muted">Локальный запуск: входим без Telegram.</p>
+						<input name="dev_telegram_id" placeholder="Telegram ID" inputmode="numeric" required/>
+						<input name="dev_username" placeholder="username (необязательно)"/>
+						<button class="btn btn-red" type="submit">Войти</button>
+					</form>
+				}
+			</main>
+		</body>
+	</html>
+}
+
+templ appHeader(title, back string) {
+	<header class="app-head">
+		if back != "" {
+			<button type="button" class="icon-btn" hx-get={ back } hx-target="#app" aria-label="Назад">
+				<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>
+			</button>
+		}
+		<span class="app-title">{ title }</span>
+		<span class="logo">Uslugi<span class="dot">.</span></span>
+	</header>
+}
+
+templ AppMy(d AppMyData) {
+	<div class="screen">
+		<header class="app-head app-head-main">
+			<span class="city">
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#DA251D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"></path><circle cx="12" cy="9.5" r="2.5"></circle></svg>
+				if d.CityName != "" {
+					{ d.CityName }
+				} else {
+					Город не выбран
+				}
+			</span>
+			<span class="logo">Uslugi<span class="dot">.</span></span>
+		</header>
+		if d.Notice != "" {
+			<p class="notice">{ d.Notice }</p>
+		}
+		if d.Error != "" {
+			<p class="notice notice-error">{ d.Error }</p>
+		}
+		if len(d.Cities) > 0 {
+			<section class="card">
+				<h2>В каком ты городе?</h2>
+				<div class="chips">
+					for _, c := range d.Cities {
+						<button type="button" class="chip-btn" hx-post="/app/city" hx-vals={ `{"city_id":"` + id(c.ID) + `"}` } hx-target="#app">{ c.Name }</button>
+					}
+				</div>
+			</section>
+		} else {
+			<div class="section-head">
+				<h1>Мои объявления</h1>
+			</div>
+			if len(d.Cards) == 0 {
+				<section class="card empty-card">
+					<p class="big">Пока нет объявлений</p>
+					<p class="muted">Размещение бесплатное. Заполни карточку — после проверки её увидят клиенты в каталоге.</p>
+				</section>
+			}
+			for _, c := range d.Cards {
+				<button type="button" class="listing-card" hx-get={ appListingPath(c.ID) } hx-target="#app">
+					<span class="thumb">
+						if c.PhotoURL != "" {
+							<img src={ c.PhotoURL } alt=""/>
+						} else {
+							<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#9A9DA3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="3"></rect><circle cx="12" cy="13" r="3.5"></circle><path d="M9 6l1.5-2h3L15 6"></path></svg>
+						}
+					</span>
+					<span class="lc-body">
+						<span class={ appStatusClass(c.ProviderCard) }>{ appStatusLabel(c.ProviderCard) }</span>
+						<span class="lc-title">{ c.Listing().TitleOr() }</span>
+						if p := c.Listing().PriceText(); p != "" {
+							<span class="lc-price">{ p }</span>
+						}
+					</span>
+					<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9A9DA3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg>
+				</button>
+			}
+			<div class="bottom-bar">
+				<button type="button" class="btn btn-red btn-block" hx-post="/app/listings" hx-target="#app">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+					Новое объявление
+				</button>
+			</div>
+		}
+	</div>
+}
+
+templ AppEditor(d AppEditorData) {
+	{{ sn := d.Snap() }}
+	{{ l := d.State.Listing }}
+	<div class="screen">
+		if d.isNew() {
+			@appHeader("Новое объявление", "/app/my")
+		} else {
+			@appHeader("Объявление", "/app/my")
+		}
+		@editorBanner(d)
+		<form id="editor" hx-post={ appListingPath(l.ID) } hx-target="#app" hx-encoding="multipart/form-data">
+			<section class="card">
+				<h2>Услуга</h2>
+				<label class="field">
+					<span>Категория</span>
+					<select name="primary_category_id" hx-post={ appListingPath(l.ID) } hx-target="#app" hx-include="#editor" hx-vals='{"action":"refresh"}' hx-trigger="change" hx-encoding="multipart/form-data">
+						<option value="">Выбери услугу</option>
+						for _, g := range d.Groups {
+							<optgroup label={ g.Emoji + " " + g.Name }>
+								for _, c := range g.Items {
+									<option value={ id(c.ID) } selected?={ sn.PrimaryCategoryID == c.ID }>{ c.Name }</option>
+								}
+							</optgroup>
+						}
+					</select>
+				</label>
+				if len(d.Siblings) > 0 {
+					<div class="field">
+						<span>Ещё в этой категории <em>до 2</em></span>
+						<div class="chips" data-max="2">
+							for _, c := range d.Siblings {
+								<label class="chip-check">
+									<input type="checkbox" name="extra_category_id" value={ id(c.ID) } checked?={ d.hasExtra(c.ID) }/>
+									<span>{ c.Name }</span>
+								</label>
+							}
+						</div>
+					</div>
+				}
+				<label class="field">
+					<span>Название <em>до 60 символов</em></span>
+					<input name="title" value={ sn.Title } maxlength="60" placeholder="Маникюр с покрытием, выезд на дом"/>
+				</label>
+				<label class="field">
+					<span>Описание</span>
+					<textarea name="description" rows="5" maxlength="1000" placeholder="Что делаешь, опыт, материалы, где принимаешь">{ sn.Description }</textarea>
+				</label>
+			</section>
+			<section class="card">
+				<h2>Где работаешь</h2>
+				<div class="chips">
+					for _, c := range d.Cities {
+						<label class="chip-check">
+							<input type="checkbox" name="city_id" value={ id(c.ID) } checked?={ d.hasCity(c.ID) }/>
+							<span>{ c.Name }</span>
+						</label>
+					}
+				</div>
+				<label class="switch">
+					<input type="checkbox" name="travels" value="1" checked?={ sn.TravelsToClient }/>
+					<span class="switch-ui"></span>
+					<span>Выезжаю к клиенту</span>
+				</label>
+			</section>
+			<section class="card">
+				<h2>Цена</h2>
+				<div class="segmented">
+					<label><input type="radio" name="price_type" value="fixed" checked?={ sn.PriceType == "fixed" }/><span>Точная</span></label>
+					<label><input type="radio" name="price_type" value="from" checked?={ sn.PriceType == "from" }/><span>От …</span></label>
+					<label><input type="radio" name="price_type" value="negotiable" checked?={ sn.PriceType == "negotiable" }/><span>Договорная</span></label>
+				</div>
+				<div class="price-row" data-hide-when-negotiable>
+					<input name="price_amount" value={ d.PriceInput } inputmode="decimal" placeholder="450 000 или 450к"/>
+					<div class="segmented segmented-sm">
+						<label><input type="radio" name="currency" value="VND" checked?={ sn.Currency == "VND" || sn.Currency == "" }/><span>₫</span></label>
+						<label><input type="radio" name="currency" value="USD" checked?={ sn.Currency == "USD" }/><span>$</span></label>
+					</div>
+				</div>
+			</section>
+			<section class="card">
+				<h2>Фото <em>{ countLabel(len(d.PhotoURLs)) } из { countLabel(maxPhotos()) }</em></h2>
+				<div class="photo-grid">
+					for i, u := range d.PhotoURLs {
+						<div class="photo">
+							<img src={ u } alt={ "Фото " + countLabel(i+1) }/>
+							<button type="submit" class="photo-del" name="action" value={ photoIndex(i) } aria-label="Удалить фото">×</button>
+						</div>
+					}
+					if len(d.PhotoURLs) < maxPhotos() {
+						<label class="photo photo-add">
+							<input type="file" name="photos" accept="image/jpeg,image/png" multiple data-autoupload/>
+							<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+							<span>Добавить</span>
+						</label>
+					}
+				</div>
+				<p class="hint">С фото работ объявление смотрят чаще. Первое фото — обложка.</p>
+			</section>
+			<section class="card">
+				<h2>Контакты</h2>
+				if d.Username != "" {
+					<label class="switch">
+						<input type="checkbox" name="show_telegram" value="1" checked?={ sn.Telegram != "" }/>
+						<span class="switch-ui"></span>
+						<span>Telegram <b>{ "@" + d.Username }</b></span>
+					</label>
+				} else {
+					<p class="hint">У твоего аккаунта нет username в Telegram — клиентам нужен WhatsApp или телефон.</p>
+				}
+				<label class="field">
+					<span>WhatsApp</span>
+					<input name="whatsapp" value={ sn.WhatsApp } inputmode="tel" placeholder="+84 905 123 456"/>
+				</label>
+				<label class="field">
+					<span>Телефон</span>
+					<input name="phone" value={ sn.Phone } inputmode="tel" placeholder="+84 905 123 456"/>
+				</label>
+				<label class="field">
+					<span>Instagram</span>
+					<input name="instagram" value={ sn.Instagram } placeholder="ник или ссылка"/>
+				</label>
+			</section>
+			<section class="card">
+				<h2>Языки и график</h2>
+				<div class="chips">
+					for _, c := range languageCodes() {
+						<label class="chip-check">
+							<input type="checkbox" name="language" value={ c } checked?={ d.hasLang(c) }/>
+							<span>{ languageLabel(c) }</span>
+						</label>
+					}
+				</div>
+				<label class="field">
+					<span>График <em>необязательно</em></span>
+					<input name="schedule" value={ sn.Schedule } maxlength="200" placeholder="пн–сб, 10:00–19:00"/>
+				</label>
+			</section>
+			if d.TermsNeeded {
+				<section class="card">
+					<h2>Правила</h2>
+					<p class="terms">{ d.TermsText }</p>
+					<label class="switch">
+						<input type="checkbox" name="terms" value="1"/>
+						<span class="switch-ui"></span>
+						<span>Принимаю правила площадки</span>
+					</label>
+				</section>
+			}
+			if m := d.missingText(); m != "" {
+				<p class="hint hint-center">Для отправки осталось: { m }</p>
+			}
+			<div class="bottom-bar">
+				<button type="submit" class="btn btn-grey" name="action" value="save">Сохранить</button>
+				<button type="submit" class="btn btn-red" name="action" value="submit">{ d.submitLabel() }</button>
+			</div>
+		</form>
+	</div>
+}
+
+templ editorBanner(d AppEditorData) {
+	{{ l := d.State.Listing }}
+	if d.Error != "" {
+		<p class="notice notice-error">{ d.Error }</p>
+	}
+	if d.Notice != "" {
+		<p class="notice">{ d.Notice }</p>
+	}
+	switch {
+		case l.Status == store.ListingRejected:
+			<div class="banner banner-warn">
+				<b>Объявление отклонено</b>
+				if l.RejectionReason != nil {
+					<span>{ *l.RejectionReason }</span>
+				}
+				<span>Исправь и отправь снова.</span>
+			</div>
+		case l.Status == store.ListingModeration:
+			<div class="banner"><b>На проверке</b><span>Обычно проверяем в течение 12 часов в рабочие дни. Можно поправить, пока ждёшь.</span></div>
+		case d.State.RevisionPending:
+			<div class="banner"><b>Правка на проверке</b><span>Клиенты видят прежнюю версию, пока модератор не одобрит изменения.</span></div>
+		case d.State.Mode == store.EditRevision:
+			<div class="banner banner-ok"><b>Опубликовано</b><span>Изменения уйдут на проверку, до одобрения клиенты видят текущую версию.</span></div>
+	}
+}

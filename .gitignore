@@ -7,7 +7,7 @@
 *.session-journal
 
 # Загруженные фото и медиа
-media/
+/media/
 
 # Сборка
 /bin/

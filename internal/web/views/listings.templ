@@ -1,6 +1,10 @@
 package views
 
-import "github.com/signaveris-13/uslugi/internal/store"
+import (
+	"time"
+
+	"github.com/signaveris-13/uslugi/internal/store"
+)
 
 templ listingsTabs(p Page, active string) {
 	<nav class="tabs">
@@ -12,6 +16,12 @@ templ listingsTabs(p Page, active string) {
 				}
 			</a>
 		}
+		<a href="/listings?status=revisions" class={ templ.KV("active", active == StatusRevisions) }>
+			Правки
+			if p.RevisionCount > 0 {
+				<span class="tab-count">{ countLabel(p.RevisionCount) }</span>
+			}
+		</a>
 		<a href="/complaints" class={ templ.KV("active", active == "complaints") }>
 			Жалобы
 			if p.ComplaintCount > 0 {
@@ -31,6 +41,8 @@ templ ListingsPage(d ListingsData) {
 			if len(d.Rows) == 0 {
 				if d.Filter.Status == store.ListingModeration {
 					<p class="empty">Очередь пуста — все объявления проверены.</p>
+				} else if d.Filter.Status == StatusRevisions {
+					<p class="empty">Правок на проверке нет.</p>
 				} else {
 					<p class="empty">Объявлений нет.</p>
 				}
@@ -43,7 +55,7 @@ templ ListingsPage(d ListingsData) {
 							<th>Город</th>
 							<th>Исполнитель</th>
 							<th>Статус</th>
-							if d.Filter.Status == store.ListingModeration {
+							if d.Filter.Status == store.ListingModeration || d.Filter.Status == StatusRevisions {
 								<th>Ждёт с</th>
 							} else {
 								<th>Обновлено</th>
@@ -64,7 +76,7 @@ templ ListingsPage(d ListingsData) {
 								</td>
 								<td><span class={ listingStatusClass(r.Status) }>{ listingStatusLabel(r.Status) }</span></td>
 								<td class="muted">
-									if d.Filter.Status == store.ListingModeration {
+									if d.Filter.Status == store.ListingModeration || d.Filter.Status == StatusRevisions {
 										{ timeOr(r.SubmittedAt, d.TZ) }
 									} else {
 										{ formatTime(r.UpdatedAt, d.TZ) }
@@ -98,14 +110,18 @@ templ ListingPage(d ListingData) {
 		}
 		<div class="lead-layout">
 			<div>
-				if len(l.PhotoFileIDs) > 0 {
+				if d.Revision != nil {
+					@revisionChanges(*d.Revision, d.TZ)
+				}
+				if len(d.Photos) > 0 {
 					<section class="panel">
-						<h2>Фото · { countLabel(len(l.PhotoFileIDs)) }</h2>
-						<div class="photos">
-							for _, p := range l.PhotoFileIDs {
-								<a href={ photoURL(p) } target="_blank" rel="noopener"><img src={ string(photoURL(p)) } alt="Фото объявления" loading="lazy"/></a>
+						<h2>
+							Фото · { countLabel(len(d.Photos)) }
+							if d.Revision != nil {
+								<span class="muted">текущая версия</span>
 							}
-						</div>
+						</h2>
+						@photoStrip(d.Photos)
 					</section>
 				}
 				<section class="panel">
@@ -158,6 +174,9 @@ templ ListingPage(d ListingData) {
 			</div>
 			<aside class="lead-side">
 				@complaintsPanel(d)
+				if d.Revision != nil {
+					@revisionPanel(d)
+				}
 				@moderationPanel(d)
 				@providerPanel(d)
 				if len(d.Duplicates) > 0 {
@@ -360,4 +379,73 @@ templ ComplaintsPage(d ComplaintsData) {
 			</table>
 		}
 	}
+}
+
+templ photoStrip(urls []string) {
+	<div class="photos">
+		for _, u := range urls {
+			<a href={ templ.SafeURL(u) } target="_blank" rel="noopener"><img src={ u } alt="Фото объявления" loading="lazy"/></a>
+		}
+	</div>
+}
+
+templ revisionChanges(r RevisionView, tz *time.Location) {
+	<section class="panel panel-warn">
+		<h2>Правка исполнителя · { formatTime(r.CreatedAt, tz) }</h2>
+		<p class="hint">Клиенты видят текущую версию. После одобрения карточка обновится.</p>
+		if len(r.Changes) == 0 && !r.PhotosChanged {
+			<p>Поля не изменились.</p>
+		}
+		if len(r.Changes) > 0 {
+			<table class="diff">
+				<thead>
+					<tr><th>Поле</th><th>Было</th><th>Стало</th></tr>
+				</thead>
+				<tbody>
+					for _, c := range r.Changes {
+						<tr>
+							<td class="strong">{ c.Label }</td>
+							<td class="diff-old pre">{ c.Old }</td>
+							<td class="diff-new pre">{ c.New }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+		if r.PhotosChanged {
+			<h3>Фото после правки · { countLabel(len(r.NewPhotos)) }</h3>
+			if len(r.NewPhotos) > 0 {
+				@photoStrip(r.NewPhotos)
+			} else {
+				<p class="hint">Все фото удалены.</p>
+			}
+		}
+	</section>
+}
+
+templ revisionPanel(d ListingData) {
+	{{ l := d.Listing }}
+	<section class="panel">
+		<h2>Решение по правке</h2>
+		<p class="hint">Тот же чек-лист, что для нового объявления. При отказе опубликованная версия остаётся.</p>
+		<form method="post" action={ templ.SafeURL(listingAction(l.ID, "revision/approve")) } hx-boost="false">
+			<button type="submit" class="button big wide">✅ Одобрить правку</button>
+		</form>
+		<form class="reject-form" method="post" action={ templ.SafeURL(listingAction(l.ID, "revision/reject")) } hx-boost="false">
+			<label>
+				Причина
+				<select name="reason">
+					<option value="">Своими словами ↓</option>
+					for _, r := range rejectReasons() {
+						<option value={ r }>{ r }</option>
+					}
+				</select>
+			</label>
+			<label>
+				Комментарий для исполнителя
+				<textarea name="comment" rows="2" placeholder="Что именно поправить"></textarea>
+			</label>
+			<button type="submit" class="button secondary wide">Отклонить правку</button>
+		</form>
+	</section>
 }

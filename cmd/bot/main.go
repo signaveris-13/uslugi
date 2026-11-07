@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/go-telegram/bot"
@@ -13,6 +14,7 @@ import (
 	"github.com/signaveris-13/uslugi/internal/botapp"
 	"github.com/signaveris-13/uslugi/internal/config"
 	"github.com/signaveris-13/uslugi/internal/db"
+	"github.com/signaveris-13/uslugi/internal/media"
 	"github.com/signaveris-13/uslugi/internal/store"
 )
 
@@ -48,6 +50,15 @@ func main() {
 	}
 
 	app := botapp.New(st, log)
+	if m, err := media.New(cfg.MediaDir); err == nil {
+		app.SetMedia(m)
+	} else {
+		log.Warn("папка для фото недоступна: фото из приложения бот не покажет", "err", err)
+	}
+	app.SetPublicURL(cfg.PublicURL)
+	if cfg.PublicURL == "" || !strings.HasPrefix(cfg.PublicURL, "https://") {
+		log.Warn("PUBLIC_URL не задан или не https: кнопок Mini App в боте не будет")
+	}
 	b, err := bot.New(cfg.BotToken, bot.WithDefaultHandler(app.DefaultHandler))
 	if err != nil {
 		log.Error("не удалось запустить бота", "err", err)
@@ -59,6 +70,8 @@ func main() {
 	} else {
 		log.Warn("username бота", "err", err)
 	}
+
+	app.SetupMenuButton(ctx, b)
 
 	log.Info("бот запущен, жду сообщений", "env", cfg.Env)
 	b.Start(ctx) // long polling до Ctrl+C

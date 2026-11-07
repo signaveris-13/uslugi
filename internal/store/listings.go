@@ -68,10 +68,10 @@ type Listing struct {
 	CreatedAt        time.Time  `db:"created_at"`
 
 	// Заполняется GetListing.
-	PrimaryCategory *Option  `db:"-"`
-	ExtraCategories []Option `db:"-"`
-	Cities          []Option `db:"-"`
-	PhotoFileIDs    []string `db:"-"`
+	PrimaryCategory *Option         `db:"-"`
+	ExtraCategories []Option        `db:"-"`
+	Cities          []Option        `db:"-"`
+	Photos          []SnapshotPhoto `db:"-"` // загруженные в бот (file_id) и в приложение (storage_key)
 }
 
 const listingCols = `id, provider_id, status, title, description, price_type, price_amount::float8 AS price_amount,
@@ -166,9 +166,7 @@ func (s *Store) GetListing(ctx context.Context, id, providerID int64) (Listing, 
 		return Listing{}, err
 	}
 
-	rows, _ = s.pool.Query(ctx, `
-		SELECT telegram_file_id FROM listing_photo WHERE listing_id = $1 AND telegram_file_id IS NOT NULL ORDER BY position`, id)
-	if l.PhotoFileIDs, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+	if l.Photos, err = s.listingPhotos(ctx, nil, id); err != nil {
 		return Listing{}, err
 	}
 	return l, nil

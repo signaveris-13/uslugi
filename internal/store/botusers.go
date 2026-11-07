@@ -263,3 +263,9 @@ func (s *Store) SetLeadListing(ctx context.Context, leadID, listingID int64) err
 	_, err := s.pool.Exec(ctx, `UPDATE lead SET listing_id = $2, updated_at = now() WHERE id = $1`, leadID, listingID)
 	return err
 }
+
+func (s *Store) UserByID(ctx context.Context, id int64) (User, error) {
+	rows, _ := s.pool.Query(ctx, `SELECT `+userCols+` FROM users WHERE id = $1`, id)
+	u, err := collectOne[User](rows)
+	return u, notFound(err)
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -286,5 +287,107 @@ func TestModeration(t *testing.T) {
 	info, _ := s.ProviderInfo(ctx, p.ID)
 	if !info.IsBlocked {
 		t.Fatal("исполнитель не заблокирован")
+	}
+}
+
+func TestEditorAndRevisions(t *testing.T) {
+	s, pool := testStore(t)
+	ctx := context.Background()
+	m := testMember(t, s, pool)
+
+	tg := TelegramUser{ID: 7_100_000_000 + rand.Int64N(100_000_000), Username: fmt.Sprintf("ed_test_%d", rand.IntN(1e6)), FirstName: "Ира"}
+	u, _, _ := s.UpsertBotUser(ctx, tg, "")
+	t.Cleanup(func() {
+		ctx := context.Background()
+		pool.Exec(ctx, `DELETE FROM listing WHERE provider_id IN (SELECT id FROM provider WHERE user_id = $1)`, u.ID)
+		pool.Exec(ctx, `DELETE FROM provider WHERE user_id = $1`, u.ID)
+		pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, u.ID)
+	})
+	p, _ := s.EnsureProvider(ctx, u, "Ира")
+	var catID, extraID, parentID, cityID int64
+	pool.QueryRow(ctx, `SELECT id, parent_id FROM category WHERE slug = 'hair'`).Scan(&catID, &parentID)
+	pool.QueryRow(ctx, `SELECT id FROM category WHERE slug = 'makeup'`).Scan(&extraID)
+	pool.QueryRow(ctx, `SELECT id FROM city WHERE slug = 'nha-trang'`).Scan(&cityID)
+
+	id, _ := s.CreateListingDraft(ctx, p.ID, ListingDraftInput{CityID: cityID, Telegram: tg.Username, Currency: "VND"})
+	st, err := s.LoadEditor(ctx, id, p.ID)
+	if err != nil || st.Mode != EditDirect {
+		t.Fatalf("черновик: %+v %v", st.Mode, err)
+	}
+
+	// Черновик правится напрямую; лишние пробелы и дубли чистятся.
+	amount := 500000.0
+	sn := st.Snapshot
+	sn.Title, sn.Description = "  Стрижки и окрашивание ", "Работаю с 2019"
+	sn.PrimaryCategoryID, sn.ExtraCategoryIDs = catID, []int64{extraID, extraID, catID}
+	sn.PriceType, sn.PriceAmount = "from", &amount
+	sn.Languages = []string{"ru", "xx"}
+	sn.Photos = []SnapshotPhoto{{StorageKey: "2026/11/aaaaaaaaaaaaaaaaaaaaaaaa.jpg"}}
+	st, err = s.SaveEditor(ctx, id, p.ID, sn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Listing.TitleOr() != "Стрижки и окрашивание" || len(st.Listing.ExtraCategories) != 1 || strings.Join(st.Listing.Languages, ",") != "ru" {
+		t.Fatalf("после сохранения: %q %v %v", st.Listing.TitleOr(), st.Listing.ExtraCategories, st.Listing.Languages)
+	}
+	bad := st.Snapshot
+	bad.PrimaryCategoryID = parentID
+	var ve ValidationError
+	if _, err := s.SaveEditor(ctx, id, p.ID, bad); !errors.As(err, &ve) {
+		t.Fatalf("категория верхнего уровня: %v", err)
+	}
+
+	if err := s.SubmitEditor(ctx, id, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApproveListing(ctx, m.ID, id); err != nil {
+		t.Fatal(err)
+	}
+
+	// Опубликованное: правка ждёт модерации, клиенты видят старую версию.
+	st, _ = s.LoadEditor(ctx, id, p.ID)
+	if st.Mode != EditRevision || st.RevisionPending {
+		t.Fatalf("опубликованное: %+v", st)
+	}
+	sn = st.Snapshot
+	sn.Title = "Стрижки, окрашивание, укладки"
+	if _, err := s.SaveEditor(ctx, id, p.ID, sn); err != nil {
+		t.Fatal(err)
+	}
+	l, _ := s.PublishedListing(ctx, id)
+	if l.TitleOr() != "Стрижки и окрашивание" {
+		t.Fatalf("клиенты должны видеть старую версию: %q", l.TitleOr())
+	}
+	st, _ = s.LoadEditor(ctx, id, p.ID)
+	if !st.RevisionPending || st.Snapshot.Title != "Стрижки, окрашивание, укладки" {
+		t.Fatalf("форма должна показывать правку: %+v", st.Snapshot.Title)
+	}
+	if n, _ := s.CountPendingRevisions(ctx); n < 1 {
+		t.Fatal("правки нет в очереди")
+	}
+
+	if _, err := s.RejectRevision(ctx, m.ID, id, "Название слишком общее"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PendingRevision(ctx, id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("после отказа правки нет: %v", err)
+	}
+
+	sn.Title = "Женские стрижки и окрашивание"
+	s.SaveEditor(ctx, id, p.ID, sn)
+	res, err := s.ApproveRevision(ctx, m.ID, id)
+	if err != nil || res.TelegramID != tg.ID {
+		t.Fatalf("одобрение правки: %+v %v", res, err)
+	}
+	l, _ = s.PublishedListing(ctx, id)
+	if l.TitleOr() != "Женские стрижки и окрашивание" || len(l.Photos) != 1 || l.Photos[0].StorageKey == "" {
+		t.Fatalf("после одобрения: %q", l.TitleOr())
+	}
+	rows, _ := s.ListingPhotoRows(ctx, id)
+	if len(rows) != 1 || rows[0].StorageKey == nil {
+		t.Fatalf("фото: %+v", rows)
+	}
+	if !s.PhotoVisibleTo(ctx, *rows[0].StorageKey, p.ID) {
+		t.Fatal("своё фото должно быть доступно")
 	}
 }

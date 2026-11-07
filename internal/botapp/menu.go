@@ -60,11 +60,15 @@ func (a *App) showMenu(t *turn, prefix string) {
 	if prefix != "" {
 		text = prefix + "\n\n" + text
 	}
-	a.show(t, text, keyboard{
+	kb := keyboard{
 		row(btn("🔍 Найти услугу", "c:cats")),
 		row(btn("⭐ Избранное", "c:favs"), btn("➕ Разместить", "m:new")),
 		row(btn("📋 Мои объявления", "m:mine"), btn("📍 Сменить город", "m:city")),
-	})
+	}
+	if a.publicURL != "" {
+		kb = append(kb, row(appBtn("📱 Объявления в приложении", a.appURL(0))))
+	}
+	a.show(t, text, kb)
 }
 
 func (a *App) onMenu(t *turn, item string) {
@@ -123,10 +127,23 @@ func (a *App) showMyListings(t *turn) {
 			title = *l.Title
 		}
 		label := fmt.Sprintf("%s %s · %s", listingStatusIcons[l.Status], title, store.ListingStatusLabels[l.Status])
+		if a.publicURL != "" && (l.Status == store.ListingPublished || l.Status == store.ListingPaused) {
+			// Опубликованное правится в приложении: правка уходит на проверку, клиенты видят прежнюю версию.
+			kb = append(kb, row(appBtn(truncate("✏️ "+title+" · "+store.ListingStatusLabels[l.Status], 60), a.appURL(l.ID))))
+			continue
+		}
 		kb = append(kb, row(btn(truncate(label, 60), fmt.Sprintf("f:open:%d", l.ID))))
 	}
-	kb = append(kb, row(btn("➕ Новое объявление", "m:new")), row(btn("← В меню", "m:menu")))
-	a.show(t, "<b>Мои объявления</b>", kb)
+	kb = append(kb, row(btn("➕ Новое объявление", "m:new")))
+	if a.publicURL != "" {
+		kb = append(kb, row(appBtn("📱 Открыть в приложении", a.appURL(0))))
+	}
+	kb = append(kb, row(btn("← В меню", "m:menu")))
+	text := "<b>Мои объявления</b>"
+	if a.publicURL != "" {
+		text += "\nОпубликованные (✏️) правятся в приложении: изменения уйдут на проверку, а клиенты пока видят прежнюю версию."
+	}
+	a.show(t, text, kb)
 }
 
 func truncate(s string, n int) string {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/signaveris-13/uslugi/internal/config"
 	"github.com/signaveris-13/uslugi/internal/db"
+	"github.com/signaveris-13/uslugi/internal/media"
 	"github.com/signaveris-13/uslugi/internal/store"
 	"github.com/signaveris-13/uslugi/internal/tgclient"
 	"github.com/signaveris-13/uslugi/internal/web"
@@ -75,10 +76,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	mediaStore, err := media.New(cfg.MediaDir)
+	if err != nil {
+		log.Error("папка для фото", "err", err, "dir", cfg.MediaDir)
+		os.Exit(1)
+	}
+
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: web.New(st, log, web.Options{
 			Telegram:     tg,
+			Media:        mediaStore,
+			BotToken:     cfg.BotToken,
+			DevLogin:     cfg.IsLocal(), // локально Mini App открывается в браузере без Telegram
 			BotUsername:  botUsername,
 			SecureCookie: !cfg.IsLocal(),
 			TimeZone:     tz,
@@ -93,7 +103,7 @@ func main() {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("веб-сервер запущен", "addr", cfg.HTTPAddr, "admin", "http://localhost"+cfg.HTTPAddr+"/login")
+	log.Info("веб-сервер запущен", "addr", cfg.HTTPAddr, "admin", "http://localhost"+cfg.HTTPAddr+"/login", "miniapp", "http://localhost"+cfg.HTTPAddr+"/app")
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("веб-сервер", "err", err)
 		os.Exit(1)

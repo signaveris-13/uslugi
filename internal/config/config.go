@@ -26,6 +26,10 @@ type Config struct {
 	TeamTelegramIDs []int64
 	// AdminTimezone — в каком часовом поясе админка показывает время.
 	AdminTimezone string
+	// PublicURL — внешний https-адрес сервера. Нужен для Mini App: Telegram открывает только https.
+	PublicURL string
+	// MediaDir — папка для фото, загруженных через Mini App. Общая у web и bot.
+	MediaDir string
 }
 
 func Load() (Config, error) {
@@ -37,6 +41,8 @@ func Load() (Config, error) {
 		HTTPAddr:    getenv("HTTP_ADDR", ":8080"),
 		// По умолчанию — время рынка запуска (Нячанг).
 		AdminTimezone: getenv("ADMIN_TIMEZONE", "Asia/Ho_Chi_Minh"),
+		PublicURL:     strings.TrimSuffix(os.Getenv("PUBLIC_URL"), "/"),
+		MediaDir:      getenv("MEDIA_DIR", "media"),
 	}
 
 	ids, err := parseIDs(os.Getenv("TEAM_TELEGRAM_IDS"))

@@ -3,14 +3,18 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"embed"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/a-h/templ"
 
+	"github.com/signaveris-13/uslugi/internal/media"
 	"github.com/signaveris-13/uslugi/internal/store"
 	"github.com/signaveris-13/uslugi/internal/web/views"
 )
@@ -22,6 +26,10 @@ type Server struct {
 	store       *store.Store
 	log         *slog.Logger
 	tg          Telegram
+	media       *media.Store
+	botToken    string
+	appSecret   []byte // подпись токенов Mini App и ссылок на фото
+	devLogin    bool   // локально: вход в Mini App без Telegram
 	botUsername string
 	secure      bool // cookie только по HTTPS (всё, кроме локального запуска)
 	tz          *time.Location
@@ -29,6 +37,9 @@ type Server struct {
 
 type Options struct {
 	Telegram     Telegram // nil — без уведомлений и фото
+	Media        *media.Store
+	BotToken     string // проверка входа в Mini App
+	DevLogin     bool
 	BotUsername  string
 	SecureCookie bool
 	TimeZone     *time.Location
@@ -39,7 +50,13 @@ func New(s *store.Store, log *slog.Logger, opt Options) *Server {
 	if tz == nil {
 		tz = time.UTC
 	}
-	return &Server{store: s, log: log, tg: opt.Telegram, botUsername: opt.BotUsername, secure: opt.SecureCookie, tz: tz}
+	secret := sha256.Sum256([]byte("uslugi-app:" + opt.BotToken))
+	if opt.BotToken == "" {
+		rand.Read(secret[:])
+	}
+	return &Server{store: s, log: log, tg: opt.Telegram, media: opt.Media, botToken: opt.BotToken,
+		appSecret: secret[:], devLogin: opt.DevLogin,
+		botUsername: opt.BotUsername, secure: opt.SecureCookie, tz: tz}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -47,6 +64,7 @@ func (s *Server) Routes() http.Handler {
 
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	mux.HandleFunc("GET /healthz", s.healthz)
+	s.appRoutes(mux)
 
 	mux.HandleFunc("GET /login", s.loginPage)
 	mux.HandleFunc("GET /login/status", s.loginStatus)
@@ -71,9 +89,12 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("GET /listings/{id}", auth(s.listingShow))
 	mux.Handle("POST /listings/{id}/approve", auth(s.listingApprove))
 	mux.Handle("POST /listings/{id}/reject", auth(s.listingReject))
+	mux.Handle("POST /listings/{id}/revision/approve", auth(s.revisionApprove))
+	mux.Handle("POST /listings/{id}/revision/reject", auth(s.revisionReject))
 	mux.Handle("POST /providers/{id}/block", auth(s.providerBlock))
 	mux.Handle("POST /providers/{id}/unblock", auth(s.providerUnblock))
 	mux.Handle("GET /media/tg/{fileID}", auth(s.telegramMedia))
+	mux.Handle("GET /media/file/{key...}", auth(s.adminMedia))
 	mux.Handle("GET /complaints", auth(s.complaintsList))
 	mux.Handle("POST /complaints/{id}/resolve", auth(s.complaintResolve))
 
@@ -99,7 +120,11 @@ func (s *Server) page(r *http.Request, me store.TeamMember, title, nav string) v
 	if err != nil {
 		s.log.Warn("жалобы", "err", err)
 	}
-	return views.Page{Title: title, Me: me, Nav: nav, TZ: s.tz, QueueCount: n, ComplaintCount: c}
+	rv, err := s.store.CountPendingRevisions(r.Context())
+	if err != nil {
+		s.log.Warn("правки", "err", err)
+	}
+	return views.Page{Title: title, Me: me, Nav: nav, TZ: s.tz, QueueCount: n, ComplaintCount: c, RevisionCount: rv}
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, c templ.Component) {
@@ -123,7 +148,12 @@ func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
+		if r.URL.Path == "/app" || strings.HasPrefix(r.URL.Path, "/app/") {
+			// Mini App в Telegram Web открывается во фрейме.
+			h.Set("Content-Security-Policy", "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org")
+		} else {
+			h.Set("X-Frame-Options", "DENY")
+		}
 		h.Set("Referrer-Policy", "same-origin")
 		next.ServeHTTP(w, r)
 	})

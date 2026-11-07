@@ -192,7 +192,7 @@ func (a *App) showCard(t *turn, listingID, categoryID int64, page int) {
 	}
 	a.event(t, "listing_viewed", "listing", l.ID, nil)
 	// Карточка с фото — всегда новым сообщением: альбом нельзя «отредактировать» в старое.
-	if len(l.PhotoFileIDs) > 0 {
+	if len(l.Photos) > 0 {
 		t.editID = 0
 	}
 	a.sendCard(t, l, a.cardFooter(l), a.cardKeyboard(t, l, categoryID, page))
