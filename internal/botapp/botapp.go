@@ -1,12 +1,15 @@
-// Package botapp — сценарии Telegram-бота.
+// Package botapp — сценарии Telegram-бота: онбординг, меню, форма объявления
+// исполнителя, приглашения из CRM и подтверждение входа в админку.
 package botapp
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -17,16 +20,54 @@ import (
 type App struct {
 	store *store.Store
 	log   *slog.Logger
+
+	// Альбом приходит пачкой отдельных сообщений: на первое отвечаем,
+	// а на следующие обновляем тот же ответ со счётчиком фото.
+	mu     sync.Mutex
+	albums map[string]albumReply
+}
+
+type albumReply struct {
+	at    time.Time
+	msgID int
 }
 
 func New(s *store.Store, log *slog.Logger) *App {
-	return &App{store: s, log: log}
+	return &App{store: s, log: log, albums: map[string]albumReply{}}
 }
 
-// Register подключает обработчики к боту.
+// Register подключает обработчики. Всё, что не /start и не вход, идёт в onUpdate.
 func (a *App) Register(b *bot.Bot) {
 	b.RegisterHandler(bot.HandlerTypeMessageText, "/start", bot.MatchTypePrefix, a.onStart)
 	b.RegisterHandler(bot.HandlerTypeCallbackQueryData, loginCallbackPrefix, bot.MatchTypePrefix, a.onLoginConfirm)
+}
+
+// DefaultHandler — для bot.WithDefaultHandler.
+func (a *App) DefaultHandler(ctx context.Context, b *bot.Bot, u *models.Update) {
+	a.onUpdate(ctx, b, u)
+}
+
+// turn — один апдейт: кто пишет, в какой чат и какое сообщение можно отредактировать.
+type turn struct {
+	ctx    context.Context
+	b      *bot.Bot
+	chatID int64
+	editID int // сообщение с кнопками, на которое нажали; 0 — отвечаем новым
+	tg     store.TelegramUser
+	user   store.User
+}
+
+func tgUser(u models.User) store.TelegramUser {
+	return store.TelegramUser{ID: u.ID, Username: u.Username, FirstName: u.FirstName, LastName: u.LastName, LanguageCode: u.LanguageCode}
+}
+
+func (a *App) newTurn(ctx context.Context, b *bot.Bot, from models.User, chatID int64, editID int, startSource string) (*turn, bool, error) {
+	tg := tgUser(from)
+	user, created, err := a.store.UpsertBotUser(ctx, tg, startSource)
+	if err != nil {
+		return nil, false, err
+	}
+	return &turn{ctx: ctx, b: b, chatID: chatID, editID: editID, tg: tg, user: user}, created, nil
 }
 
 func (a *App) onStart(ctx context.Context, b *bot.Bot, u *models.Update) {
@@ -34,83 +75,188 @@ func (a *App) onStart(ctx context.Context, b *bot.Bot, u *models.Update) {
 	if msg == nil || msg.From == nil {
 		return
 	}
-	// Всё после "/start " — payload deep link: login_<token>, inv_<token>, l_<id>, src_<tag>…
 	payload := strings.TrimSpace(strings.TrimPrefix(msg.Text, "/start"))
-	a.log.Info("start", "user_id", msg.From.ID, "username", msg.From.Username, "payload", payload)
 
+	// Вход в админку не заводит пользователя бота.
 	if token, ok := strings.CutPrefix(payload, "login_"); ok {
 		a.askLoginConfirm(ctx, b, msg, token)
 		return
 	}
 
-	a.send(ctx, b, msg.Chat.ID, fmt.Sprintf(
-		"Привет! Это тестовый бот Uslugi — скоро здесь будет каталог услуг.\n\nТвой Telegram ID: %d", msg.From.ID))
-}
-
-const loginCallbackPrefix = "login:"
-
-// askLoginConfirm — первый шаг входа в админку: явное подтверждение кнопкой,
-// чтобы случайный переход по чужой ссылке не открыл кому-то админку.
-func (a *App) askLoginConfirm(ctx context.Context, b *bot.Bot, msg *models.Message, token string) {
-	if _, err := a.store.ActiveTeamMemberByTelegramID(ctx, msg.From.ID); err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			a.log.Error("проверка команды", "err", err)
-		}
-		a.send(ctx, b, msg.Chat.ID, "У этого аккаунта нет доступа к админке Uslugi.")
-		return
+	source, _ := strings.CutPrefix(payload, "src_")
+	if source == payload {
+		source = ""
 	}
-	_, err := b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: msg.Chat.ID,
-		Text:   "Войти в админку Uslugi в браузере, где ты нажал «Войти»?\n\nЕсли ты ничего не открывал — просто проигнорируй это сообщение.",
-		ReplyMarkup: &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{
-			{Text: "✅ Да, войти", CallbackData: loginCallbackPrefix + token},
-		}}},
-	})
+	t, created, err := a.newTurn(ctx, b, *msg.From, msg.Chat.ID, 0, source)
 	if err != nil {
-		a.log.Error("не удалось ответить", "err", err)
-	}
-}
-
-func (a *App) onLoginConfirm(ctx context.Context, b *bot.Bot, u *models.Update) {
-	cq := u.CallbackQuery
-	if cq == nil {
+		a.log.Error("пользователь бота", "err", err)
 		return
 	}
-	token := strings.TrimPrefix(cq.Data, loginCallbackPrefix)
+	if t.user.IsBlocked {
+		return
+	}
+	if created {
+		a.event(t, "bot_start", "", 0, map[string]any{"payload": payload})
+	}
+	a.log.Info("start", "user_id", t.user.ID, "payload", payload)
 
-	text := "Вход подтверждён. Вернись в браузер — страница откроется сама."
-	m, err := a.store.ConfirmLogin(ctx, token, cq.From.ID)
+	if token, ok := strings.CutPrefix(payload, "inv_"); ok {
+		a.startFromInvite(t, token)
+		return
+	}
+	if t.user.CityID == nil {
+		a.askCity(t, "Привет! Это Uslugi — каталог услуг русскоязычных мастеров.\n\nВ каком ты городе?")
+		return
+	}
+	a.showMenu(t, "")
+}
+
+func (a *App) onUpdate(ctx context.Context, b *bot.Bot, u *models.Update) {
 	switch {
-	case errors.Is(err, store.ErrNotTeamMember):
-		text = "У этого аккаунта нет доступа к админке Uslugi."
-	case errors.Is(err, store.ErrLoginExpired):
-		text = "Ссылка для входа устарела. Нажми «Войти» в браузере ещё раз."
-	case err != nil:
-		a.log.Error("подтверждение входа", "err", err)
-		text = "Что-то пошло не так. Попробуй ещё раз."
-	default:
-		a.log.Info("вход в админку подтверждён", "team_member_id", m.ID)
-		if strings.HasPrefix(m.Name, "Админ ") && cq.From.FirstName != "" {
-			name := strings.TrimSpace(cq.From.FirstName + " " + cq.From.LastName)
-			if err := a.store.UpdateTeamMemberName(ctx, m.ID, name); err != nil {
-				a.log.Error("имя участника команды", "err", err)
-			}
+	case u.CallbackQuery != nil:
+		cq := u.CallbackQuery
+		// Сразу убираем «часики» на кнопке.
+		if _, err := b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: cq.ID}); err != nil {
+			a.log.Warn("answer callback", "err", err)
 		}
-	}
-
-	if _, err := b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{CallbackQueryID: cq.ID}); err != nil {
-		a.log.Error("answer callback", "err", err)
-	}
-	if m := cq.Message.Message; m != nil {
-		_, err := b.EditMessageText(ctx, &bot.EditMessageTextParams{ChatID: m.Chat.ID, MessageID: m.ID, Text: text})
+		m := cq.Message.Message
+		if m == nil {
+			return
+		}
+		t, _, err := a.newTurn(ctx, b, cq.From, m.Chat.ID, m.ID, "")
 		if err != nil {
-			a.log.Error("edit message", "err", err)
+			a.log.Error("пользователь бота", "err", err)
+			return
 		}
+		if t.user.IsBlocked {
+			return
+		}
+		a.onCallback(t, cq.Data)
+
+	case u.Message != nil && u.Message.From != nil:
+		msg := u.Message
+		if msg.Chat.Type != models.ChatTypePrivate {
+			return
+		}
+		t, _, err := a.newTurn(ctx, b, *msg.From, msg.Chat.ID, 0, "")
+		if err != nil {
+			a.log.Error("пользователь бота", "err", err)
+			return
+		}
+		if t.user.IsBlocked {
+			return
+		}
+		a.onMessage(t, msg)
 	}
 }
 
-func (a *App) send(ctx context.Context, b *bot.Bot, chatID int64, text string) {
-	if _, err := b.SendMessage(ctx, &bot.SendMessageParams{ChatID: chatID, Text: text}); err != nil {
-		a.log.Error("не удалось ответить", "err", err)
+func (a *App) onCallback(t *turn, data string) {
+	action, arg, _ := strings.Cut(data, ":")
+	switch action {
+	case "city":
+		a.onCityChosen(t, parseID(arg))
+	case "role":
+		a.onRoleChosen(t, arg)
+	case "m":
+		a.onMenu(t, arg)
+	case "f":
+		a.onForm(t, arg)
+	default:
+		a.log.Warn("неизвестная кнопка", "data", data)
 	}
 }
+
+func (a *App) onMessage(t *turn, msg *models.Message) {
+	st, err := a.store.GetBotState(t.ctx, t.user.ID)
+	if err != nil {
+		a.fail(t, err)
+		return
+	}
+	if len(msg.Photo) > 0 {
+		a.onPhoto(t, st, msg)
+		return
+	}
+	text := strings.TrimSpace(msg.Text)
+	if text == "/menu" || text == "/cancel" {
+		a.showMenu(t, "")
+		return
+	}
+	if text != "" && st.ListingID != nil && isTextStep(st.Step) {
+		a.onFormText(t, st, text)
+		return
+	}
+	a.showMenu(t, "Не понял сообщение. Вот меню:")
+}
+
+// Отправка ------------------------------------------------------------------
+
+type keyboard [][]models.InlineKeyboardButton
+
+func btn(text, data string) models.InlineKeyboardButton {
+	return models.InlineKeyboardButton{Text: text, CallbackData: data}
+}
+
+func row(buttons ...models.InlineKeyboardButton) []models.InlineKeyboardButton { return buttons }
+
+// show редактирует сообщение, на кнопку которого нажали, или отправляет новое.
+func (a *App) show(t *turn, text string, kb keyboard) {
+	var markup models.ReplyMarkup
+	if kb != nil {
+		markup = &models.InlineKeyboardMarkup{InlineKeyboard: kb}
+	}
+	if t.editID != 0 {
+		_, err := t.b.EditMessageText(t.ctx, &bot.EditMessageTextParams{
+			ChatID: t.chatID, MessageID: t.editID, Text: text, ParseMode: models.ParseModeHTML,
+			ReplyMarkup: markup, LinkPreviewOptions: noPreview(),
+		})
+		if err == nil {
+			return
+		}
+		// Сообщение могло устареть или совпасть по тексту — тогда просто шлём новое.
+		if strings.Contains(err.Error(), "message is not modified") {
+			return
+		}
+		a.log.Warn("edit message", "err", err)
+	}
+	a.send(t, text, kb)
+}
+
+// send всегда отправляет новое сообщение и возвращает его ID (0 при ошибке).
+func (a *App) send(t *turn, text string, kb keyboard) int {
+	params := &bot.SendMessageParams{
+		ChatID: t.chatID, Text: text, ParseMode: models.ParseModeHTML, LinkPreviewOptions: noPreview(),
+	}
+	if kb != nil {
+		params.ReplyMarkup = &models.InlineKeyboardMarkup{InlineKeyboard: kb}
+	}
+	t.editID = 0
+	m, err := t.b.SendMessage(t.ctx, params)
+	if err != nil {
+		a.log.Error("send message", "err", err)
+		return 0
+	}
+	return m.ID
+}
+
+func noPreview() *models.LinkPreviewOptions {
+	yes := true
+	return &models.LinkPreviewOptions{IsDisabled: &yes}
+}
+
+func (a *App) fail(t *turn, err error) {
+	a.log.Error("бот", "err", err, "user_id", t.user.ID)
+	a.send(t, "Что-то пошло не так. Попробуй ещё раз или открой /menu.", nil)
+}
+
+func (a *App) event(t *turn, typ, objectType string, objectID int64, props map[string]any) {
+	if err := a.store.LogEvent(t.ctx, typ, t.user.ID, objectType, objectID, "", props); err != nil {
+		a.log.Warn("событие", "type", typ, "err", err)
+	}
+}
+
+func parseID(s string) int64 {
+	v, _ := strconv.ParseInt(s, 10, 64)
+	return v
+}
+
+func isNotFound(err error) bool { return errors.Is(err, store.ErrNotFound) }

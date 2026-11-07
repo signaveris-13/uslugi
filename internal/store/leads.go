@@ -86,6 +86,7 @@ type Lead struct {
 	InviteToken      *string    `db:"invite_token"`
 	InvitedAt        *time.Time `db:"invited_at"`
 	ProviderID       *int64     `db:"provider_id"`
+	ListingID        *int64     `db:"listing_id"`
 	Notes            *string    `db:"notes"`
 	Tags             []string   `db:"tags"`
 	CreatedAt        time.Time  `db:"created_at"`
@@ -139,7 +140,7 @@ const leadSelect = `
 	       l.city_id, city.name AS city_name,
 	       l.telegram_username::text AS telegram_username, l.phone, l.whatsapp, l.instagram,
 	       l.summary, l.status, l.assignee_id, tm.name AS assignee_name,
-	       l.invite_token, l.invited_at, l.provider_id, l.notes, l.tags,
+	       l.invite_token, l.invited_at, l.provider_id, l.listing_id, l.notes, l.tags,
 	       l.created_at, l.updated_at
 	FROM lead l
 	LEFT JOIN category cat ON cat.id = l.category_id

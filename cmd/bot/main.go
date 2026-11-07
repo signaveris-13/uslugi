@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
 
 	"github.com/signaveris-13/uslugi/internal/botapp"
 	"github.com/signaveris-13/uslugi/internal/config"
@@ -48,14 +47,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	b, err := bot.New(cfg.BotToken,
-		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, u *models.Update) {}),
-	)
+	app := botapp.New(st, log)
+	b, err := bot.New(cfg.BotToken, bot.WithDefaultHandler(app.DefaultHandler))
 	if err != nil {
 		log.Error("не удалось запустить бота", "err", err)
 		os.Exit(1)
 	}
-	botapp.New(st, log).Register(b)
+	app.Register(b)
 
 	log.Info("бот запущен, жду сообщений", "env", cfg.Env)
 	b.Start(ctx) // long polling до Ctrl+C
