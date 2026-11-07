@@ -75,6 +75,7 @@ func orDefault(s, d string) string {
 }
 
 type harness struct {
+	app   *App
 	t     *testing.T
 	ctx   context.Context
 	tg    *fakeTelegram
@@ -108,7 +109,7 @@ func newHarness(t *testing.T) *harness {
 	app.Register(b)
 	app.SetBotUsername("test_bot")
 
-	h := &harness{t: t, ctx: ctx, tg: tg, b: b, st: st, pool: pool,
+	h := &harness{t: t, ctx: ctx, tg: tg, b: b, st: st, pool: pool, app: app,
 		user: models.User{ID: 8_000_000_000 + rand.Int64N(1_000_000_000), FirstName: "Анна", Username: fmt.Sprintf("anna_test_%d", rand.IntN(1e6))}}
 	t.Cleanup(func() {
 		for i := len(h.clean) - 1; i >= 0; i-- {
@@ -558,4 +559,29 @@ func TestClientFlow(t *testing.T) {
 	h.click("Другое")
 	h.click("Отправить без комментария")
 	h.expectText("уже пожаловался")
+}
+
+// TestLauncher — с https-адресом бот только открывает Mini App на нужном экране.
+func TestLauncher(t *testing.T) {
+	h := newHarness(t)
+	h.app.SetPublicURL("https://uslugi.example")
+	webApp := func() string {
+		_, kb := h.lastMarkup()
+		if len(kb) == 0 || kb[0][0].WebApp == nil {
+			t.Fatalf("нет кнопки приложения: %+v", kb)
+		}
+		return kb[0][0].WebApp.URL
+	}
+	h.sendText("/start")
+	h.expectText("в приложении")
+	if u := webApp(); u != "https://uslugi.example/app" {
+		t.Fatalf("адрес: %s", u)
+	}
+	h.sendText("/start l_42")
+	if u := webApp(); u != "https://uslugi.example/app?s=l_42" {
+		t.Fatalf("ссылка на объявление: %s", u)
+	}
+	h.sendText("привет")
+	h.expectText("в приложении")
+	h.expectButton("Открыть Uslugi")
 }

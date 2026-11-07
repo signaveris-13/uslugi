@@ -31,7 +31,8 @@ type Server struct {
 	appSecret   []byte // подпись токенов Mini App и ссылок на фото
 	devLogin    bool   // локально: вход в Mini App без Telegram
 	botUsername string
-	secure      bool // cookie только по HTTPS (всё, кроме локального запуска)
+	publicURL   string // https-адрес: кнопки уведомлений открывают Mini App
+	secure      bool   // cookie только по HTTPS (всё, кроме локального запуска)
 	tz          *time.Location
 }
 
@@ -41,6 +42,7 @@ type Options struct {
 	BotToken     string // проверка входа в Mini App
 	DevLogin     bool
 	BotUsername  string
+	PublicURL    string
 	SecureCookie bool
 	TimeZone     *time.Location
 }
@@ -54,9 +56,13 @@ func New(s *store.Store, log *slog.Logger, opt Options) *Server {
 	if opt.BotToken == "" {
 		rand.Read(secret[:])
 	}
-	return &Server{store: s, log: log, tg: opt.Telegram, media: opt.Media, botToken: opt.BotToken,
+	srv := &Server{store: s, log: log, tg: opt.Telegram, media: opt.Media, botToken: opt.BotToken,
 		appSecret: secret[:], devLogin: opt.DevLogin,
 		botUsername: opt.BotUsername, secure: opt.SecureCookie, tz: tz}
+	if strings.HasPrefix(opt.PublicURL, "https://") {
+		srv.publicURL = strings.TrimSuffix(opt.PublicURL, "/")
+	}
+	return srv
 }
 
 func (s *Server) Routes() http.Handler {

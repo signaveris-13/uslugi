@@ -52,6 +52,10 @@ func (a *App) onRoleChosen(t *turn, role string) {
 }
 
 func (a *App) showMenu(t *turn, prefix string) {
+	if a.launcher() {
+		a.sendLauncher(t, prefix, "", "")
+		return
+	}
 	if t.user.CityID == nil {
 		a.askCity(t, "Сначала выбери город:")
 		return

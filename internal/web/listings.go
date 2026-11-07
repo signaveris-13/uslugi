@@ -268,7 +268,11 @@ func (s *Server) notify(r *http.Request, chatID int64, text string) bool {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	if err := s.tg.Notify(ctx, chatID, text, "📋 Мои объявления", "m:mine"); err != nil {
+	button := "m:mine"
+	if s.publicURL != "" {
+		button = s.publicURL + "/app?s=my"
+	}
+	if err := s.tg.Notify(ctx, chatID, text, "📋 Мои объявления", button); err != nil {
 		s.log.Warn("уведомление исполнителю", "err", err, "chat_id", chatID)
 		return false
 	}

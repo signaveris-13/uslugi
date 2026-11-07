@@ -3,6 +3,7 @@
 package tgclient
 
 import (
+	"strings"
 	"context"
 	"time"
 
@@ -37,9 +38,12 @@ func (c *Client) Username(ctx context.Context) (string, error) {
 func (c *Client) Notify(ctx context.Context, chatID int64, html, buttonText, buttonData string) error {
 	p := &bot.SendMessageParams{ChatID: chatID, Text: html, ParseMode: models.ParseModeHTML}
 	if buttonText != "" {
-		p.ReplyMarkup = &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{
-			{Text: buttonText, CallbackData: buttonData},
-		}}}
+		b := models.InlineKeyboardButton{Text: buttonText, CallbackData: buttonData}
+		// https-ссылка — кнопка открывает Mini App на нужном экране.
+		if strings.HasPrefix(buttonData, "https://") {
+			b = models.InlineKeyboardButton{Text: buttonText, WebApp: &models.WebAppInfo{URL: buttonData}}
+		}
+		p.ReplyMarkup = &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{b}}}
 	}
 	_, err := c.b.SendMessage(ctx, p)
 	return err

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,9 +54,33 @@ func (a *App) SetPublicURL(u string) {
 // appURL — адрес Mini App; listingID > 0 — сразу открыть форму объявления.
 func (a *App) appURL(listingID int64) string {
 	if listingID > 0 {
-		return a.publicURL + "/app?listing=" + strconv.FormatInt(listingID, 10)
+		return a.appScreen("e_" + strconv.FormatInt(listingID, 10))
 	}
 	return a.publicURL + "/app"
+}
+
+// appScreen — ссылка на экран приложения: l_<id>, c_<id>, e_<id>, my, profile.
+func (a *App) appScreen(screen string) string {
+	return a.publicURL + "/app?s=" + url.QueryEscape(screen)
+}
+
+// launcher — всё управление в Mini App, бот только открывает его и присылает уведомления.
+// Без https (локальный запуск) бот работает по-старому, кнопками.
+func (a *App) launcher() bool { return a.publicURL != "" }
+
+// sendLauncher — приветствие с кнопкой приложения.
+func (a *App) sendLauncher(t *turn, text, button, screen string) {
+	if text == "" {
+		text = "<b>Uslugi</b> — мастера и услуги рядом с тобой.\n\nКаталог, избранное и свои объявления — в приложении. Сюда будут приходить уведомления: о модерации, отзывах и ответах поддержки."
+	}
+	if button == "" {
+		button = "Открыть Uslugi"
+	}
+	u := a.appURL(0)
+	if screen != "" {
+		u = a.appScreen(screen)
+	}
+	a.show(t, text, keyboard{row(appBtn(button, u))})
 }
 
 func appBtn(text, u string) btnT { return btnT{Text: text, WebApp: &models.WebAppInfo{URL: u}} }
@@ -66,7 +91,7 @@ func (a *App) SetupMenuButton(ctx context.Context, b *bot.Bot) {
 		return
 	}
 	_, err := b.SetChatMenuButton(ctx, &bot.SetChatMenuButtonParams{
-		MenuButton: models.MenuButtonWebApp{Type: models.MenuButtonTypeWebApp, Text: "Объявления", WebApp: models.WebAppInfo{URL: a.appURL(0)}},
+		MenuButton: models.MenuButtonWebApp{Type: models.MenuButtonTypeWebApp, Text: "Uslugi", WebApp: models.WebAppInfo{URL: a.appURL(0)}},
 	})
 	if err != nil {
 		a.log.Warn("кнопка меню", "err", err)
@@ -142,6 +167,17 @@ func (a *App) onStart(ctx context.Context, b *bot.Bot, u *models.Update) {
 
 	if token, ok := strings.CutPrefix(payload, "inv_"); ok {
 		a.startFromInvite(t, token)
+		return
+	}
+	if a.launcher() {
+		switch {
+		case strings.HasPrefix(payload, "l_"):
+			a.sendLauncher(t, "Мастер, которым с тобой поделились, — в приложении.", "Открыть объявление", payload)
+		case strings.HasPrefix(payload, "c_"):
+			a.sendLauncher(t, "", "Открыть категорию", payload)
+		default:
+			a.sendLauncher(t, "", "", "")
+		}
 		return
 	}
 	if a.startFromDeepLink(t, payload) {
@@ -222,6 +258,10 @@ func (a *App) onMessage(t *turn, msg *models.Message) {
 		return
 	}
 	text := strings.TrimSpace(msg.Text)
+	if a.launcher() {
+		a.sendLauncher(t, "", "", "")
+		return
+	}
 	if text == "/menu" || text == "/cancel" {
 		a.showMenu(t, "")
 		return

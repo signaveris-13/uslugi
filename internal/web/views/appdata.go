@@ -9,11 +9,19 @@ import (
 // Данные экранов Mini App.
 
 type AppMyData struct {
-	CityName string
-	Cities   []store.City // выбор города, если он ещё не задан
-	Cards    []AppCard
-	Notice   string
-	Error    string
+	Cards  []AppCard
+	Active int
+	Limit  int
+	Notice string
+	Error  string
+}
+
+// myCardURL: опубликованное и на паузе — экран управления, остальное — форма.
+func myCardURL(c store.ProviderCard) string {
+	if c.Status == store.ListingPublished || c.Status == store.ListingPaused {
+		return appManageURL(c.ID)
+	}
+	return appListingPath(c.ID)
 }
 
 type AppCard struct {

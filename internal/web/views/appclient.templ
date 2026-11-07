@@ -1,0 +1,728 @@
+package views
+
+import "github.com/signaveris-13/uslugi/internal/store"
+
+// Нижнее меню: Главная, Избранное, «+», Мои, Профиль.
+templ appNav(active string) {
+	<nav class="tabbar" aria-label="Меню">
+		<button type="button" class={ "tab", templ.KV("tab-on", active == TabHome) } hx-get="/app/home" hx-target="#app" aria-current?={ active == TabHome }>
+			@icon("home", 24)
+			<span>Главная</span>
+		</button>
+		<button type="button" class={ "tab", templ.KV("tab-on", active == TabFav) } hx-get="/app/favorites" hx-target="#app" aria-current?={ active == TabFav }>
+			@icon("heart", 24)
+			<span>Избранное</span>
+		</button>
+		<button type="button" class="tab-plus" hx-post="/app/new" hx-target="#app" aria-label="Разместить объявление">
+			@icon("plus", 24)
+		</button>
+		<button type="button" class={ "tab", templ.KV("tab-on", active == TabMine) } hx-get="/app/my" hx-target="#app" aria-current?={ active == TabMine }>
+			@icon("list", 24)
+			<span>Мои</span>
+		</button>
+		<button type="button" class={ "tab", templ.KV("tab-on", active == TabProfile) } hx-get="/app/profile" hx-target="#app" aria-current?={ active == TabProfile }>
+			@icon("user", 24)
+			<span>Профиль</span>
+		</button>
+	</nav>
+}
+
+templ backButton(url string) {
+	<button type="button" class="icon-btn" hx-get={ url } hx-target="#app" aria-label="Назад">
+		<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>
+	</button>
+}
+
+templ subHeader(title, sub, back string) {
+	<header class="app-head">
+		if back != "" {
+			@backButton(back)
+		}
+		<div class="head-text">
+			<span class="app-title">{ title }</span>
+			if sub != "" {
+				<span class="head-sub">{ sub }</span>
+			}
+		</div>
+		{ children... }
+	</header>
+}
+
+templ notices(notice, errText string) {
+	if notice != "" {
+		<p class="notice">{ notice }</p>
+	}
+	if errText != "" {
+		<p class="notice notice-error">{ errText }</p>
+	}
+}
+
+// Главная --------------------------------------------------------------------
+
+templ AppHome(d AppHomeData) {
+	<div class="screen has-tabs">
+		<header class="app-head app-head-main home-head">
+			<div class="home-row">
+				<button type="button" class="city-btn" hx-get="/app/city?next=home" hx-target="#app" aria-label={ "Город: " + d.CityName + ". Сменить" }>
+					<span class="red">
+						@icon("pin", 18)
+					</span>
+					{ d.CityName }
+					@icon("down", 16)
+				</button>
+				<span class="logo">Uslugi<span class="dot">.</span></span>
+			</div>
+			<button type="button" class="search-field" hx-get="/app/search" hx-target="#app">
+				@icon("search", 20)
+				<span>Маникюр, трансфер, торт на заказ</span>
+			</button>
+		</header>
+		<div class="section-head row-between">
+			<h1>Категории</h1>
+			if d.Total > 0 {
+				<span class="muted">{ countMasters(d.Total) }</span>
+			}
+		</div>
+		if len(d.Categories) == 0 {
+			<section class="card empty-card">
+				<p class="big">В городе пока пусто</p>
+				<p class="muted">Мы только запускаемся. Если вы мастер — разместите услуги первым, это бесплатно.</p>
+			</section>
+		} else {
+			<div class="cat-grid">
+				for _, c := range d.Categories {
+					<button type="button" class="cat-tile" hx-get={ appCategoryURL(c.ID) } hx-target="#app">
+						<span class="cat-name">{ c.Name }</span>
+						<span class="cat-count">{ countLabel(c.Count) }</span>
+						if c.Emoji != "" {
+							<span class="cat-icon" aria-hidden="true">{ c.Emoji }</span>
+						}
+					</button>
+				}
+			</div>
+		}
+		if !d.IsProvider {
+			<section class="promo">
+				<div>
+					<span class="promo-title">Вы мастер?</span>
+					<span class="promo-text">Разместите услуги бесплатно — клиенты напишут вам напрямую.</span>
+				</div>
+				<button type="button" class="btn btn-red btn-sm" hx-post="/app/new" hx-target="#app">Разместить</button>
+			</section>
+		}
+		@appNav(TabHome)
+	</div>
+}
+
+// Выбор города ----------------------------------------------------------------
+
+templ AppCity(d AppCityData) {
+	<div class="screen">
+		if d.Current != 0 {
+			@subHeader("Город", "", "/app/" + d.Next)
+		}
+		<div class="city-intro">
+			if d.Current == 0 {
+				<span class="logo logo-big">Uslugi<span class="dot">.</span></span>
+			}
+			<h1>Где вы сейчас?</h1>
+			<p class="muted">Покажем мастеров и услуги рядом с вами. Город можно сменить в профиле.</p>
+		</div>
+		<div class="list-pad">
+			for _, c := range d.Cities {
+				<button type="button" class={ "city-row", templ.KV("city-on", c.ID == d.Current) } hx-post="/app/city" hx-vals={ vals("city_id", id(c.ID), "next", d.Next) } hx-target="#app">
+					<span class="red">
+						@icon("pin", 20)
+					</span>
+					<span class="city-text">
+						<b>{ c.Name }</b>
+						<span class="muted">{ c.Country } · { countMasters(c.Count) }</span>
+					</span>
+					if c.ID == d.Current {
+						<span class="check-dot">
+							@icon("check", 16)
+						</span>
+					}
+				</button>
+			}
+		</div>
+		<p class="hint hint-pad">Нет вашего города? Напишите в поддержку — запустим, когда наберём мастеров.</p>
+	</div>
+}
+
+// Список: категория и поиск ----------------------------------------------------
+
+templ AppList(d AppListData) {
+	<div class="screen has-tabs">
+		if d.Search {
+			<header class="app-head">
+				@backButton("/app/home")
+				<form class="search-form" hx-get="/app/search" hx-target="#app" role="search">
+					@icon("search", 20)
+					<input type="search" name="q" value={ d.Text } placeholder="Что ищете?" aria-label="Поиск услуг" enterkeyhint="search" autocomplete="off" data-autofocus/>
+				</form>
+			</header>
+		} else {
+			@subHeader(d.Title, d.Sub, d.Back) {
+				<button type="button" class={ "icon-btn", templ.KV("icon-btn-on", d.Query.Filtered()) } hx-get={ d.FilterURL } hx-target="#app" aria-label="Фильтры">
+					@icon("filter", 20)
+				</button>
+			}
+		}
+		if len(d.Chips) > 0 {
+			<div class="chip-scroll">
+				for _, c := range d.Chips {
+					<button type="button" class={ "chip-pill", templ.KV("chip-pill-on", c.On) } hx-get={ c.URL } hx-target="#app" aria-pressed?={ c.On }>{ c.Label }</button>
+				}
+			</div>
+		}
+		<div class="list-pad">
+			if d.Search && d.Text != "" && len(d.Subcats) > 0 {
+				<span class="label">Категории</span>
+				for _, c := range d.Subcats {
+					<button type="button" class="row-btn" hx-get={ appCategoryURL(c.ID) } hx-target="#app">
+						<span class="grow">{ c.Name }</span>
+						<span class="muted">{ countLabel(c.Count) }</span>
+						@icon("right", 18)
+					</button>
+				}
+			}
+			if d.Search && d.Text == "" {
+				<p class="hint">Напишите, что нужно: «маникюр», «визаран», «торт». Ищем по названию, описанию и категории.</p>
+			} else {
+				<span class="label">{ countMasters(d.Total) }</span>
+				if len(d.Cards) == 0 {
+					<section class="card empty-card">
+						<p class="big">Ничего не нашли</p>
+						if d.Query.Filtered() {
+							<p class="muted">Попробуйте убрать часть фильтров.</p>
+						} else {
+							<p class="muted">Мастеров здесь пока нет. Мы приглашаем новых каждую неделю.</p>
+						}
+					</section>
+				}
+				for _, c := range d.Cards {
+					@resultCard(c)
+				}
+				if d.MoreURL != "" {
+					<button type="button" class="btn btn-grey btn-block" hx-get={ d.MoreURL } hx-target="#app" data-keep-scroll>Показать ещё</button>
+				}
+			}
+		</div>
+		@appNav(TabHome)
+	</div>
+}
+
+templ resultCard(c AppCardView) {
+	<button type="button" class="result-card" hx-get={ appListingURL(c.ID) } hx-target="#app">
+		<span class="thumb thumb-lg">
+			if c.PhotoURL != "" {
+				<img src={ c.PhotoURL } alt="" loading="lazy"/>
+			} else {
+				@icon("camera", 26)
+			}
+			if b := photoBadge(c.PhotoCount); b != "" {
+				<span class="thumb-badge">{ b }</span>
+			}
+		</span>
+		<span class="lc-body">
+			if c.IsNew() {
+				<span class="chip chip-dark">Новый</span>
+			}
+			<span class="lc-price">{ priceOr(c.Listing()) }</span>
+			<span class="lc-title">{ c.Listing().TitleOr() }</span>
+			<span class="lc-meta">{ cardPlace(c.CatalogCard) }</span>
+			<span class="fake-btn">Написать</span>
+		</span>
+	</button>
+}
+
+// Фильтры -----------------------------------------------------------------------
+
+templ AppFilters(d AppFiltersData) {
+	<div class="screen">
+		@subHeader("Фильтры", "", d.Back) {
+			<button type="button" class="link-btn" hx-get={ d.Action } hx-target="#app">Сбросить</button>
+		}
+		<form id="filters" hx-get={ d.Action } hx-target="#app">
+			if d.SubID != 0 {
+				<input type="hidden" name="sub" value={ id(d.SubID) }/>
+			}
+			<section class="card">
+				<label class="switch switch-first">
+					<input type="checkbox" name="travels" value="1" checked?={ d.Query.Travels }/>
+					<span class="switch-ui"></span>
+					<span>Выезжает к клиенту</span>
+				</label>
+			</section>
+			<section class="card">
+				<h2>Цена</h2>
+				<div class="stack">
+					for _, p := range priceSteps {
+						<label class="radio-row">
+							<input type="radio" name="max" value={ int64Str(p.Value) } checked?={ d.Query.MaxPrice == p.Value }/>
+							<span>{ p.Label }</span>
+						</label>
+					}
+				</div>
+				<p class="hint">Объявления «по договорённости» с фильтром цены не показываем.</p>
+			</section>
+			<section class="card">
+				<h2>Язык мастера</h2>
+				<div class="chips">
+					<label class="chip-check">
+						<input type="radio" name="lang" value="" checked?={ d.Query.Language == "" }/>
+						<span>Любой</span>
+					</label>
+					for _, c := range langOptions() {
+						<label class="chip-check">
+							<input type="radio" name="lang" value={ c } checked?={ d.Query.Language == c }/>
+							<span>{ languageLabel(c) }</span>
+						</label>
+					}
+				</div>
+			</section>
+			<div class="bottom-bar">
+				<button type="submit" class="btn btn-red btn-block">Показать</button>
+			</div>
+		</form>
+	</div>
+}
+
+// Карточка ----------------------------------------------------------------------
+
+templ AppListing(d AppListingData) {
+	{{ l := d.Listing }}
+	<div class="screen screen-card">
+		<div class="hero">
+			if len(d.PhotoURLs) > 0 {
+				<div class="hero-strip">
+					for i, u := range d.PhotoURLs {
+						<img src={ u } alt={ "Фото " + countLabel(i+1) } loading="lazy"/>
+					}
+				</div>
+				if len(d.PhotoURLs) > 1 {
+					<span class="hero-count">{ countLabel(len(d.PhotoURLs)) } фото — листайте</span>
+				}
+			} else {
+				<span class="hero-empty">
+					@icon("camera", 40)
+				</span>
+			}
+			<div class="hero-actions">
+				<button type="button" class="float-btn" hx-get={ d.Back } hx-target="#app" aria-label="Назад">
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>
+				</button>
+				<span class="grow"></span>
+				if d.ShareURL != "" {
+					<button type="button" class="float-btn" data-share={ d.ShareURL } aria-label="Поделиться">
+						@icon("share", 20)
+					</button>
+				}
+				@FavButton(l.ID, d.Fav)
+			</div>
+		</div>
+		<section class="card-sheet">
+			if isNewListing(l) {
+				<span class="chip chip-dark">Новый</span>
+			}
+			<h1>{ l.TitleOr() }</h1>
+			<span class="card-price">{ priceOr(l) }</span>
+			if p := listingPlace(l); p != "" {
+				<span class="card-place">
+					<span class="red">
+						@icon("pin", 16)
+					</span>
+					{ p }
+				</span>
+			}
+		</section>
+		@notices(d.Notice, d.Error)
+		if d.Own {
+			<div class="banner"><b>Это ваше объявление</b><span>Так его видят клиенты.</span></div>
+		}
+		<section class="card">
+			<div class="author">
+				<span class="avatar">{ firstLetter(d.ProviderName) }</span>
+				<div class="author-body">
+					<b>{ d.ProviderName }</b>
+					if l.Description != nil {
+						<p class="bubble">{ *l.Description }</p>
+					}
+				</div>
+			</div>
+		</section>
+		<section class="card">
+			<dl class="facts">
+				if c := listingCats(l); c != "" {
+					<dt>Услуги</dt>
+					<dd>{ c }</dd>
+				}
+				if g := listingLangs(l); g != "" {
+					<dt>Языки</dt>
+					<dd>{ g }</dd>
+				}
+				if l.Schedule != nil {
+					<dt>График</dt>
+					<dd>{ *l.Schedule }</dd>
+				}
+			</dl>
+		</section>
+		<p class="hint hint-pad">Uslugi — площадка, а не сторона сделки. Договаривайтесь с мастером напрямую.</p>
+		if !d.Own {
+			<button type="button" class="link-btn link-pad" hx-get={ complaintPath(l.ID) } hx-target="#app">Пожаловаться на объявление</button>
+		}
+		<div class="bottom-bar">
+			if l.ContactTelegram != nil {
+				<button type="button" class="btn btn-red" hx-post={ contactPath(l.ID, "tg") } hx-swap="none">
+					@icon("send", 20)
+					Написать
+				</button>
+			}
+			if l.ContactWhatsApp != nil {
+				<button type="button" class={ "btn", templ.KV("btn-red", l.ContactTelegram == nil), templ.KV("btn-grey", l.ContactTelegram != nil) } hx-post={ contactPath(l.ID, "wa") } hx-swap="none">WhatsApp</button>
+			}
+			if l.ContactPhone != nil {
+				<button type="button" class="btn btn-grey btn-icon" hx-post={ contactPath(l.ID, "ph") } hx-swap="none" aria-label="Позвонить">
+					@icon("phone", 20)
+				</button>
+			}
+			if l.ContactInstagram != nil {
+				<button type="button" class="btn btn-grey btn-icon" hx-post={ contactPath(l.ID, "ig") } hx-swap="none" aria-label="Instagram">
+					@icon("insta", 20)
+				</button>
+			}
+		</div>
+	</div>
+}
+
+templ FavButton(listingID int64, on bool) {
+	<button type="button" class={ "float-btn", templ.KV("fav-on", on) } hx-post={ favPath(listingID) } hx-swap="outerHTML" aria-pressed?={ on } aria-label="В избранное">
+		@iconFilled("heart", 20, on)
+	</button>
+}
+
+// Жалоба ------------------------------------------------------------------------
+
+templ AppComplaint(d AppComplaintData) {
+	<div class="screen">
+		@subHeader("Пожаловаться", d.Listing.TitleOr() + " · " + d.Name, appListingURL(d.Listing.ID))
+		@notices("", d.Error)
+		<form hx-post={ complaintPath(d.Listing.ID) } hx-target="#app">
+			<div class="list-pad">
+				<span class="label">Что не так?</span>
+				for _, r := range complaintReasons() {
+					<label class="radio-row radio-card">
+						<input type="radio" name="reason" value={ r } checked?={ d.Reason == r } required/>
+						<span>{ complaintLabel(r) }</span>
+					</label>
+				}
+				<label class="field">
+					<span>Подробности <em>необязательно</em></span>
+					<textarea name="comment" rows="4" maxlength="1000" placeholder="Например: номер не отвечает">{ d.Comment }</textarea>
+				</label>
+				<p class="hint">Модератор проверит жалобу. Мастер не узнает, кто её отправил.</p>
+			</div>
+			<div class="bottom-bar">
+				<button type="submit" class="btn btn-red btn-block">Отправить жалобу</button>
+			</div>
+		</form>
+	</div>
+}
+
+// Избранное ---------------------------------------------------------------------
+
+templ AppFavorites(d AppFavData) {
+	<div class="screen has-tabs">
+		<header class="app-head app-head-main">
+			<div class="head-text">
+				<span class="app-title app-title-big">Избранное</span>
+				if len(d.Cards) > 0 {
+					<span class="head-sub">{ countLabel(len(d.Cards)) } в списке</span>
+				}
+			</div>
+			<span class="logo">Uslugi<span class="dot">.</span></span>
+		</header>
+		<div class="list-pad">
+			if len(d.Cards) == 0 {
+				<section class="card empty-card">
+					<p class="big">Пока пусто</p>
+					<p class="muted">Нажмите на сердечко в карточке мастера, чтобы не потерять его.</p>
+					<button type="button" class="btn btn-grey" hx-get="/app/home" hx-target="#app">В каталог</button>
+				</section>
+			}
+			for _, c := range d.Cards {
+				if c.Status == store.ListingPublished {
+					@resultCard(AppCardView{CatalogCard: c.CatalogCard, PhotoURL: c.PhotoURL})
+				} else {
+					<div class="result-card result-off">
+						<span class="thumb thumb-lg">
+							@icon("camera", 26)
+						</span>
+						<span class="lc-body">
+							<span class="chip">Снято с публикации</span>
+							<span class="lc-title">{ c.Listing().TitleOr() }</span>
+							<span class="lc-meta">{ c.ProviderName }</span>
+							<button type="button" class="btn btn-grey btn-sm" hx-post={ favPath(c.ID) } hx-vals={ vals("from", "favorites") } hx-target="#app">Убрать</button>
+						</span>
+					</div>
+				}
+			}
+		</div>
+		@appNav(TabFav)
+	</div>
+}
+
+// Профиль -----------------------------------------------------------------------
+
+templ AppProfile(d AppProfileData) {
+	<div class="screen has-tabs">
+		<header class="app-head app-head-main profile-head">
+			<div class="profile-row">
+				<span class="avatar avatar-lg">{ firstLetter(d.Name) }</span>
+				<div class="head-text grow">
+					<span class="app-title">{ d.Name }</span>
+					<span class="head-sub">
+						if d.Username != "" {
+							{ "@" + d.Username }
+						}
+						if d.IsProvider {
+							· исполнитель
+						}
+					</span>
+				</div>
+				<button type="button" class="pill-btn" hx-get="/app/city?next=profile" hx-target="#app">
+					<span class="red">
+						@icon("pin", 16)
+					</span>
+					{ d.CityName }
+				</button>
+			</div>
+			if d.IsProvider {
+				<div class="stack">
+					<span class="row-between"><b>За 7 дней</b></span>
+					<div class="stat-row">
+						<div class="stat"><b>{ countLabel(d.Stats.Views) }</b><span>просмотров</span></div>
+						<div class="stat"><b>{ countLabel(d.Stats.Contacts) }</b><span>открыли контакты</span></div>
+						<div class="stat"><b>{ countLabel(d.Stats.Favorites) }</b><span>в избранном</span></div>
+					</div>
+				</div>
+			}
+		</header>
+		<div class="list-pad">
+			if d.IsProvider {
+				<button type="button" class="big-row" hx-get="/app/my" hx-target="#app">
+					<span class="grow stack-sm">
+						<b>Мои объявления</b>
+						<span class="muted">{ d.Summary }</span>
+						<span class="bar"><span style={ barWidth(d.Active, d.Limit) }></span></span>
+						<span class="muted">Активных { countLabel(d.Active) } из { countLabel(d.Limit) }</span>
+					</span>
+					@icon("right", 20)
+				</button>
+			} else {
+				<section class="promo">
+					<div>
+						<span class="promo-title">Вы мастер?</span>
+						<span class="promo-text">Разместите услуги бесплатно, без комиссии.</span>
+					</div>
+					<button type="button" class="btn btn-red btn-sm" hx-post="/app/new" hx-target="#app">Разместить</button>
+				</section>
+			}
+			<section class="card menu">
+				<button type="button" class="menu-row" hx-get="/app/support" hx-target="#app">
+					<span class="menu-ico">
+						@icon("help", 20)
+					</span>
+					<span class="grow">Написать в поддержку</span>
+					@icon("right", 18)
+				</button>
+				<button type="button" class="menu-row" hx-get="/app/rules" hx-target="#app">
+					<span class="menu-ico">
+						@icon("doc", 20)
+					</span>
+					<span class="grow">Правила площадки</span>
+					@icon("right", 18)
+				</button>
+				<button type="button" class="menu-row" hx-get="/app/city?next=profile" hx-target="#app">
+					<span class="menu-ico">
+						@icon("pin", 20)
+					</span>
+					<span class="grow">Город</span>
+					<span class="muted">{ d.CityName }</span>
+					@icon("right", 18)
+				</button>
+			</section>
+			<p class="hint hint-pad">Уведомления о модерации, отзывах и поддержке приходят в чат с ботом.</p>
+		</div>
+		@appNav(TabProfile)
+	</div>
+}
+
+// Разместить услуги: для тех, кто ещё не исполнитель ---------------------------
+
+templ AppIntro() {
+	<div class="screen">
+		@subHeader("Разместить услуги", "", "/app/home")
+		<div class="list-pad">
+			<section class="hero-dark">
+				<span class="hero-dark-title">Клиенты найдут вас сами</span>
+				<span class="hero-dark-text">Бесплатная витрина для мастеров. Без комиссии и посредников.</span>
+			</section>
+			<section class="card steps">
+				<div class="step"><span class="step-n">1</span><div><b>Заполните карточку</b><span class="muted">Услуга, цена, фото работ и контакты — около 5 минут.</span></div></div>
+				<div class="step"><span class="step-n">2</span><div><b>Мы проверим</b><span class="muted">Обычно до 12 часов в рабочие дни. Напишем, когда опубликуем.</span></div></div>
+				<div class="step"><span class="step-n">3</span><div><b>Клиенты пишут напрямую</b><span class="muted">В Telegram, WhatsApp или звонят. Мы не берём процент.</span></div></div>
+			</section>
+		</div>
+		<div class="bottom-bar">
+			<button type="button" class="btn btn-red btn-block" hx-post="/app/listings" hx-target="#app">
+				@icon("plus", 20)
+				Создать объявление
+			</button>
+		</div>
+	</div>
+}
+
+// Отправлено на модерацию ------------------------------------------------------
+
+templ AppSubmitted(title string, revision bool) {
+	<div class="screen">
+		<div class="done">
+			<span class="done-ico">
+				@icon("clock", 40)
+			</span>
+			if revision {
+				<h1>Правка на проверке</h1>
+				<p class="muted">Клиенты видят прежнюю версию, пока модератор не одобрит изменения. Обычно до 12 часов.</p>
+			} else {
+				<h1>Отправили на проверку</h1>
+				<p class="muted">Обычно проверяем в течение 12 часов в рабочие дни. Бот напишет, когда объявление опубликуют.</p>
+			}
+		</div>
+		<section class="card timeline">
+			<div class="tl tl-done"><span class="tl-dot">
+				@icon("check", 16)
+			</span><div><b>Заполнено</b><span class="muted">{ title }</span></div></div>
+			<div class="tl tl-now"><span class="tl-dot"></span><div><b>На модерации</b><span class="muted">Пока ждёте, объявление можно поправить</span></div></div>
+			<div class="tl"><span class="tl-dot"></span><div><b>Опубликовано</b><span class="muted">Клиенты увидят вас в каталоге</span></div></div>
+		</section>
+		<div class="bottom-bar">
+			<button type="button" class="btn btn-grey" hx-get="/app/home" hx-target="#app">На главную</button>
+			<button type="button" class="btn btn-red" hx-get="/app/my" hx-target="#app">Мои объявления</button>
+		</div>
+	</div>
+}
+
+// Управление опубликованным ----------------------------------------------------
+
+templ AppManage(d AppManageData) {
+	{{ l := d.Listing }}
+	<div class="screen">
+		@subHeader("Объявление", "", "/app/my") {
+			if l.Status == store.ListingPublished {
+				<button type="button" class="pill-btn" hx-get={ appListingURL(l.ID) } hx-target="#app">
+					@icon("eye", 16)
+					Как видят клиенты
+				</button>
+			}
+		}
+		@notices(d.Notice, d.Error)
+		<section class="card own-card">
+			<span class="thumb thumb-md">
+				if d.PhotoURL != "" {
+					<img src={ d.PhotoURL } alt=""/>
+				} else {
+					@icon("camera", 24)
+				}
+			</span>
+			<span class="lc-body">
+				if l.Status == store.ListingPaused {
+					<span class="chip">На паузе</span>
+				} else {
+					<span class="chip chip-ok">Опубликовано</span>
+				}
+				<b>{ l.TitleOr() }</b>
+				<span class="lc-price">{ priceOr(l) }</span>
+			</span>
+		</section>
+		if d.Revision {
+			<div class="banner"><b>Правка на проверке</b><span>Клиенты видят текущую версию, пока модератор не одобрит изменения.</span></div>
+		}
+		<section class="card">
+			<div class="row-between">
+				<h2>Статистика</h2>
+				<div class="segmented segmented-sm segmented-w">
+					<label><input type="radio" name="days" checked?={ d.Days != 30 } hx-get={ appManageURL(l.ID) + "?days=7" } hx-target="#app" hx-trigger="change"/><span>7 дней</span></label>
+					<label><input type="radio" name="days" checked?={ d.Days == 30 } hx-get={ appManageURL(l.ID) + "?days=30" } hx-target="#app" hx-trigger="change"/><span>30 дней</span></label>
+				</div>
+			</div>
+			<div class="stat-row">
+				<div class="stat"><b>{ countLabel(d.Stats().Views) }</b><span>просмотров</span></div>
+				<div class="stat"><b>{ countLabel(d.Stats().Contacts) }</b><span>открыли контакты</span></div>
+				<div class="stat"><b>{ countLabel(d.Stats().Favorites) }</b><span>в избранном</span></div>
+			</div>
+			<p class="hint">Контакты — сколько раз клиенты нажали «Написать», WhatsApp, телефон или Instagram.</p>
+		</section>
+		if l.Status == store.ListingPublished {
+			<section class="card card-warn">
+				<h2>Объявление ещё актуально?</h2>
+				<p class="hint">Раз в 60 дней спросим об этом в боте. Если не ответите, поставим на паузу, чтобы клиенты не писали зря.</p>
+				<div class="row-gap">
+					<button type="button" class="btn btn-dark" hx-post={ appManageURL(l.ID) + "/actualize" } hx-target="#app">Да, актуально</button>
+					<button type="button" class="btn btn-white" hx-post={ appManageURL(l.ID) + "/pause" } hx-target="#app">На паузу</button>
+				</div>
+			</section>
+		}
+		<section class="card menu">
+			<button type="button" class="menu-row" hx-get={ appListingPath(l.ID) } hx-target="#app">
+				<span class="menu-ico">
+					@icon("edit", 20)
+				</span>
+				<span class="grow">Редактировать</span>
+				<span class="muted">через проверку</span>
+				@icon("right", 18)
+			</button>
+			if d.ShareURL != "" && l.Status == store.ListingPublished {
+				<button type="button" class="menu-row" data-share={ d.ShareURL }>
+					<span class="menu-ico">
+						@icon("share", 20)
+					</span>
+					<span class="grow">Поделиться ссылкой</span>
+					@icon("right", 18)
+				</button>
+			}
+			if l.Status == store.ListingPaused {
+				<button type="button" class="menu-row" hx-post={ appManageURL(l.ID) + "/resume" } hx-target="#app">
+					<span class="menu-ico">
+						@icon("play", 20)
+					</span>
+					<span class="grow">Вернуть в каталог</span>
+				</button>
+			} else {
+				<button type="button" class="menu-row" hx-post={ appManageURL(l.ID) + "/pause" } hx-target="#app">
+					<span class="menu-ico">
+						@icon("pause", 20)
+					</span>
+					<span class="grow">Снять с публикации</span>
+					<span class="muted">пауза</span>
+				</button>
+			}
+			<button type="button" class="menu-row menu-danger" hx-post={ appManageURL(l.ID) + "/delete" } hx-target="#app" hx-confirm="Удалить объявление? Вернуть его не получится.">
+				<span class="menu-ico">
+					@icon("trash", 20)
+				</span>
+				<span class="grow">Удалить объявление</span>
+			</button>
+		</section>
+	</div>
+}
+
+templ AppRules(d AppRulesData) {
+	<div class="screen">
+		@subHeader("Правила площадки", "", "/app/profile")
+		<section class="card">
+			<p class="terms terms-full">{ d.Text }</p>
+		</section>
+	</div>
+}

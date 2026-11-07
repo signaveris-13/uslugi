@@ -27,7 +27,9 @@ func (s *Server) appRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/photo/{key}", s.appPhoto)
 	mux.HandleFunc("GET /app/tgphoto/{fileID}", s.appTelegramPhoto)
 	mux.Handle("GET /app/my", s.appUser(s.appMy))
+	mux.Handle("GET /app/city", s.appUser(s.appCityPage))
 	mux.Handle("POST /app/city", s.appUser(s.appCity))
+	s.appClientRoutes(mux)
 	mux.Handle("POST /app/listings", s.appUser(s.appNewListing))
 	mux.Handle("GET /app/listings/{id}", s.appUser(s.appEditor))
 	mux.Handle("POST /app/listings/{id}", s.appUser(s.appEditorPost))
@@ -112,18 +114,11 @@ func (s *Server) appMy(w http.ResponseWriter, r *http.Request, u store.User) {
 
 func (s *Server) renderMy(w http.ResponseWriter, r *http.Request, u store.User, notice, errText string) {
 	ctx := r.Context()
-	d := views.AppMyData{Notice: notice, Error: errText}
 	if u.CityID == nil {
-		cities, err := s.store.ListCities(ctx)
-		if err != nil {
-			s.fail(w, r, err)
-			return
-		}
-		d.Cities = cities
-		s.render(w, r, http.StatusOK, views.AppMy(d))
+		s.renderCity(w, r, u, "my")
 		return
 	}
-	d.CityName = s.store.CityName(ctx, *u.CityID)
+	d := views.AppMyData{Notice: notice, Error: errText}
 	p, err := s.store.ProviderByUser(ctx, u.ID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.fail(w, r, err)
@@ -143,6 +138,8 @@ func (s *Server) renderMy(w http.ResponseWriter, r *http.Request, u store.User, 
 			}
 			d.Cards = append(d.Cards, card)
 		}
+		d.Active, _ = s.store.CountActiveListings(ctx, p.ID)
+		d.Limit = s.store.ProviderListingLimit(ctx, p)
 	}
 	s.render(w, r, http.StatusOK, views.AppMy(d))
 }
@@ -165,7 +162,14 @@ func (s *Server) appCity(w http.ResponseWriter, r *http.Request, u store.User) {
 		return
 	}
 	u.CityID = &id
-	s.renderMy(w, r, u, "", "")
+	switch r.FormValue("next") {
+	case "my":
+		s.renderMy(w, r, u, "", "")
+	case "profile":
+		s.appProfile(w, r, u)
+	default:
+		s.renderHome(w, r, u)
+	}
 }
 
 // appNewListing — «Новое объявление»: те же правила, что в боте (черновик, лимит, блокировка).
@@ -497,17 +501,20 @@ func (s *Server) appSubmit(w http.ResponseWriter, r *http.Request, u store.User,
 			s.log.Warn("правила", "err", err)
 		}
 	}
-	notice := "Отправили на модерацию. Обычно проверяем в течение 12 часов в рабочие дни — бот напишет, когда объявление опубликуют."
+	title := before.Snapshot.Title
+	if st, err := s.store.LoadEditor(ctx, id, p.ID); err == nil && st.Snapshot.Title != "" {
+		title = st.Snapshot.Title
+	}
 	switch {
 	case before.Mode == store.EditRevision:
-		notice = "Правка ушла на проверку. Клиенты видят прежнюю версию, пока модератор не одобрит изменения."
 		_ = s.store.LogEvent(ctx, "listing_revision_submitted", u.ID, "listing", id, "miniapp", nil)
+		s.render(w, r, http.StatusOK, views.AppSubmitted(title, true))
 	case before.Listing.Status == store.ListingModeration:
-		notice = "Сохранено. Объявление по-прежнему на проверке."
+		s.renderMy(w, r, u, "Сохранено. Объявление по-прежнему на проверке.", "")
 	default:
 		_ = s.store.LogEvent(ctx, "listing_submitted", u.ID, "listing", id, "miniapp", nil)
+		s.render(w, r, http.StatusOK, views.AppSubmitted(title, false))
 	}
-	s.renderMy(w, r, u, notice, "")
 }
 
 // Фото ------------------------------------------------------------------------

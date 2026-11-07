@@ -136,12 +136,12 @@ func TestMiniApp(t *testing.T) {
 
 	// Город, затем пустой список и новое объявление.
 	_, body, _ = a.do(http.MethodGet, "/app/my", nil, "")
-	mustContain(t, body, "В каком ты городе?")
+	mustContain(t, body, "Где вы сейчас?")
 	var cityID, catID int64
 	e.pool.QueryRow(ctx, `SELECT id FROM city WHERE slug = 'nha-trang'`).Scan(&cityID)
 	e.pool.QueryRow(ctx, `SELECT id FROM category WHERE slug = 'manicure'`).Scan(&catID)
-	_, body = a.form("/app/city", url.Values{"city_id": {strconv.FormatInt(cityID, 10)}})
-	mustContain(t, body, "Мои объявления", "Пока нет объявлений", "Нячанг")
+	_, body = a.form("/app/city", url.Values{"city_id": {strconv.FormatInt(cityID, 10)}, "next": {"my"}})
+	mustContain(t, body, "Мои объявления", "Пока нет объявлений")
 
 	_, body = a.form("/app/listings", nil)
 	mustContain(t, body, "Новое объявление", "Отправить на модерацию", "@"+username)
@@ -210,7 +210,7 @@ func TestMiniApp(t *testing.T) {
 	mustContain(t, body, "Отметь, что принимаешь правила")
 	submit.Set("terms", "1")
 	_, body = a.multipartForm(path, submit, nil)
-	mustContain(t, body, "Отправили на модерацию", "На модерации")
+	mustContain(t, body, "Отправили на проверку", "На модерации")
 	l, _ := e.st.GetListing(ctx, id, 0)
 	if l.Status != store.ListingModeration || l.PriceAmount == nil || *l.PriceAmount != 450000 || l.ContactTelegram == nil || *l.ContactTelegram != username {
 		t.Fatalf("объявление: %+v", l)
@@ -240,7 +240,7 @@ func TestMiniApp(t *testing.T) {
 	edit.Set("title", "Маникюр и педикюр с покрытием")
 	edit.Set("action", "submit")
 	_, body = a.multipartForm(path, edit, nil)
-	mustContain(t, body, "Правка ушла на проверку", "Правка на проверке")
+	mustContain(t, body, "Правка на проверке", "Клиенты видят прежнюю версию")
 	pub, _ := e.st.PublishedListing(ctx, id)
 	if pub.TitleOr() != "Маникюр с покрытием" {
 		t.Fatalf("в каталоге уже новая версия: %q", pub.TitleOr())
@@ -278,5 +278,98 @@ func TestMiniApp(t *testing.T) {
 		t.Fatalf("уведомление: %+v", n)
 	}
 	_, body, _ = a.do(http.MethodGet, "/app/my", nil, "")
-	mustContain(t, body, "Маникюр с покрытием и дизайном", "Опубликовано", "/app/photo/")
+	mustContain(t, body, "Маникюр с покрытием и дизайном", "Опубликовано", "/app/photo/", "/manage")
+
+	testClientScreens(t, e, a, id, catID, cityID)
+}
+
+// testClientScreens — каталог глазами клиента и управление опубликованным.
+func testClientScreens(t *testing.T, e *env, master *appClient, id, catID, cityID int64) {
+	ctx := e.ctx
+	clientID := 5_500_000_000 + rand.Int64N(400_000_000)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		e.pool.Exec(ctx, `DELETE FROM event WHERE user_id = (SELECT id FROM users WHERE telegram_id = $1)`, clientID)
+		e.pool.Exec(ctx, `DELETE FROM users WHERE telegram_id = $1`, clientID)
+	})
+	user, _ := json.Marshal(map[string]any{"id": clientID, "first_name": "Клиент"})
+	initData := signInitData(testBotToken, map[string]string{"auth_date": strconv.FormatInt(time.Now().Unix(), 10), "user": string(user)})
+	c := &appClient{e: e}
+	_, body := c.form("/app/auth", url.Values{"init_data": {initData}})
+	var res struct{ Token string }
+	json.Unmarshal([]byte(body), &res)
+	c.token = res.Token
+
+	// Без города главная просит выбрать город, потом показывает категории.
+	_, body, _ = c.do(http.MethodGet, "/app/home", nil, "")
+	mustContain(t, body, "Где вы сейчас?")
+	_, body = c.form("/app/city", url.Values{"city_id": {strconv.FormatInt(cityID, 10)}})
+	mustContain(t, body, "Категории", "Красота", "Вы мастер?")
+
+	var parentID int64
+	e.pool.QueryRow(ctx, `SELECT parent_id FROM category WHERE id = $1`, catID).Scan(&parentID)
+	_, body, _ = c.do(http.MethodGet, fmt.Sprintf("/app/c/%d", parentID), nil, "")
+	mustContain(t, body, "Маникюр с покрытием и дизайном", "Маникюр и педикюр", fmt.Sprintf("/app/l/%d", id))
+	// Фильтр по выезду оставляет объявление, фильтр по цене до 300 000 — убирает.
+	_, body, _ = c.do(http.MethodGet, fmt.Sprintf("/app/c/%d?travels=1", parentID), nil, "")
+	mustContain(t, body, "Маникюр с покрытием и дизайном")
+	_, body, _ = c.do(http.MethodGet, fmt.Sprintf("/app/c/%d?max=300000", parentID), nil, "")
+	if strings.Contains(body, "Маникюр с покрытием и дизайном") {
+		t.Fatal("фильтр цены не сработал")
+	}
+	_, body, _ = c.do(http.MethodGet, fmt.Sprintf("/app/c/%d/filters?travels=1", parentID), nil, "")
+	mustContain(t, body, "Фильтры", "Выезжает к клиенту", "checked")
+
+	_, body, _ = c.do(http.MethodGet, "/app/search?q="+url.QueryEscape("дизайн"), nil, "")
+	mustContain(t, body, "Маникюр с покрытием и дизайном")
+	_, body, _ = c.do(http.MethodGet, "/app/search?q="+url.QueryEscape("маникюр"), nil, "")
+	mustContain(t, body, "Категории", "Маникюр и педикюр")
+
+	// Карточка: просмотр пишется, «Написать» открывает чат и пишет contact_clicked.
+	_, body, _ = c.do(http.MethodGet, fmt.Sprintf("/app/l/%d", id), nil, "")
+	mustContain(t, body, "Маникюр с покрытием и дизайном", "Написать", "WhatsApp", "Пожаловаться")
+	code, _, h := c.do(http.MethodPost, fmt.Sprintf("/app/l/%d/contact/tg", id), nil, "")
+	if code != http.StatusNoContent || !strings.Contains(h.Get("HX-Trigger"), "https://t.me/") {
+		t.Fatalf("контакт: %d %s", code, h.Get("HX-Trigger"))
+	}
+	var contacts int
+	e.pool.QueryRow(ctx, `SELECT count(*) FROM event WHERE type = 'contact_clicked' AND object_id = $1`, id).Scan(&contacts)
+	if contacts == 0 {
+		t.Fatal("contact_clicked не записан")
+	}
+
+	_, body = c.form(fmt.Sprintf("/app/l/%d/fav", id), nil)
+	mustContain(t, body, "fav-on")
+	_, body, _ = c.do(http.MethodGet, "/app/favorites", nil, "")
+	mustContain(t, body, "Маникюр с покрытием и дизайном")
+
+	_, body = c.form(fmt.Sprintf("/app/l/%d/complaint", id), url.Values{})
+	mustContain(t, body, "Выберите, что не так")
+	_, body = c.form(fmt.Sprintf("/app/l/%d/complaint", id), url.Values{"reason": {"wrong_contacts"}, "comment": {"не отвечает"}})
+	mustContain(t, body, "Жалоба у модератора")
+	_, body = c.form(fmt.Sprintf("/app/l/%d/complaint", id), url.Values{"reason": {"other"}})
+	mustContain(t, body, "уже пожаловались")
+	e.pool.Exec(ctx, `DELETE FROM complaint WHERE listing_id = $1`, id)
+
+	_, body, _ = c.do(http.MethodGet, "/app/profile", nil, "")
+	mustContain(t, body, "Клиент", "Написать в поддержку", "Вы мастер?")
+	_, body = c.form("/app/new", nil)
+	mustContain(t, body, "Разместить услуги", "Создать объявление")
+
+	// Исполнитель: статистика, пауза, возврат и удаление.
+	_, body, _ = master.do(http.MethodGet, "/app/profile", nil, "")
+	mustContain(t, body, "За 7 дней", "Мои объявления", "1 опубликовано")
+	_, body, _ = master.do(http.MethodGet, fmt.Sprintf("/app/listings/%d/manage", id), nil, "")
+	mustContain(t, body, "Статистика", "Снять с публикации", "Ещё актуально?"[0:0]+"актуально")
+	_, body = master.form(fmt.Sprintf("/app/listings/%d/manage/pause", id), nil)
+	mustContain(t, body, "На паузе", "Вернуть в каталог")
+	if code, _, _ := c.do(http.MethodGet, fmt.Sprintf("/app/l/%d", id), nil, ""); code != http.StatusOK {
+		t.Fatalf("снятое объявление: %d", code)
+	}
+	_, body = master.form(fmt.Sprintf("/app/listings/%d/manage/resume", id), nil)
+	mustContain(t, body, "снова в каталоге")
+	_, body = master.form(fmt.Sprintf("/app/listings/%d/manage/delete", id), nil)
+	mustContain(t, body, "Объявление удалено")
+	_, body, _ = c.do(http.MethodGet, "/app/favorites", nil, "")
+	mustContain(t, body, "Снято с публикации")
 }

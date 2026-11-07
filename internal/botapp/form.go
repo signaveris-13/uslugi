@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -645,6 +646,10 @@ func (a *App) startFromInvite(t *turn, token string) {
 
 	// Уже есть черновик — продолжаем его.
 	if id, _, err := a.store.ProviderDraft(t.ctx, p.ID); err == nil {
+		if a.launcher() {
+			a.sendLauncher(t, "С возвращением! Черновик объявления ждёт тебя в приложении.", "Продолжить объявление", "e_"+strconv.FormatInt(id, 10))
+			return
+		}
 		a.send(t, "С возвращением! Продолжим твоё объявление.", nil)
 		a.goTo(t, id, stepPreview, false)
 		return
@@ -675,7 +680,12 @@ func (a *App) startFromInvite(t *turn, token string) {
 	if err := a.store.SetLeadListing(t.ctx, lead.ID, id); err != nil {
 		a.log.Warn("лид → объявление", "err", err)
 	}
-	a.send(t, "Привет! Это Uslugi. Мы подготовили черновик твоего объявления — проверь, дополни то, чего не хватает, и отправь на модерацию. Размещение бесплатное.", nil)
+	const hello = "Привет! Это Uslugi. Мы подготовили черновик твоего объявления — проверь, дополни то, чего не хватает, и отправь на модерацию. Размещение бесплатное."
+	if a.launcher() {
+		a.sendLauncher(t, hello, "Открыть черновик", "e_"+strconv.FormatInt(id, 10))
+		return
+	}
+	a.send(t, hello, nil)
 	a.goTo(t, id, stepPreview, false)
 }
 

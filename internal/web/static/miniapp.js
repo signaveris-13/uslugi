@@ -60,12 +60,21 @@
     status("Открой приложение из бота в Telegram.");
   }
 
+  // С какого экрана начать: ?s=… в ссылке бота или start_param прямой ссылки.
+  // l_12 — карточка, c_5 — категория, e_12 — своё объявление, my, profile, new.
   function startPath() {
-    var p = tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
-    if (p && /^edit_\d+$/.test(p)) return "/app/listings/" + p.slice(5);
-    var q = new URLSearchParams(location.search).get("listing");
-    if (q && /^\d+$/.test(q)) return "/app/listings/" + q;
-    return "/app/my";
+    var qs = new URLSearchParams(location.search);
+    var p = qs.get("s") || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || "";
+    var m;
+    if ((m = /^l_(\d+)$/.exec(p))) return "/app/l/" + m[1];
+    if ((m = /^c_(\d+)$/.exec(p))) return "/app/c/" + m[1];
+    if ((m = /^(?:e|edit)_(\d+)$/.exec(p))) return "/app/listings/" + m[1];
+    if (p === "my") return "/app/my";
+    if (p === "profile") return "/app/profile";
+    if (p === "support") return "/app/support";
+    var legacy = qs.get("listing");
+    if (legacy && /^\d+$/.test(legacy)) return "/app/listings/" + legacy;
+    return "/app/home";
   }
 
   document.body.addEventListener("htmx:configRequest", function (ev) {
@@ -79,6 +88,38 @@
     login(function () { open("/app/my"); });
   });
 
+  // Сервер просит открыть чат мастера: Telegram — внутри Telegram, остальное — снаружи.
+  document.body.addEventListener("app-open", function (ev) {
+    var u = ev.detail && ev.detail.url;
+    if (!u) return;
+    if (ev.detail.text) toast(ev.detail.text);
+    if (u.indexOf("https://t.me/") === 0 && tg && tg.openTelegramLink) tg.openTelegramLink(u);
+    else if (u.indexOf("tel:") === 0) window.location.href = u;
+    else if (tg && tg.openLink) tg.openLink(u);
+    else window.open(u, "_blank");
+  });
+
+  document.body.addEventListener("app-toast", function (ev) {
+    if (ev.detail && ev.detail.text) toast(ev.detail.text);
+  });
+
+  // Подтверждение — нативным окном Telegram, а не window.confirm.
+  document.body.addEventListener("htmx:confirm", function (ev) {
+    var q = ev.detail.question;
+    if (!q) return;
+    ev.preventDefault();
+    if (tg && tg.showConfirm) tg.showConfirm(q, function (ok) { if (ok) ev.detail.issueRequest(true); });
+    else if (window.confirm(q)) ev.detail.issueRequest(true);
+  });
+
+  document.body.addEventListener("click", function (ev) {
+    var b = ev.target.closest("[data-share]");
+    if (!b) return;
+    var u = b.getAttribute("data-share");
+    if (tg && tg.openTelegramLink) tg.openTelegramLink(u);
+    else window.open(u, "_blank");
+  });
+
   document.body.addEventListener("htmx:responseError", function (ev) {
     if (ev.detail.xhr.status !== 401) toast("Что-то пошло не так. Попробуй ещё раз.");
   });
@@ -89,7 +130,7 @@
   function syncScreen(root) {
     // Кнопка «Назад» Telegram повторяет стрелку в шапке.
     if (tg && tg.BackButton) {
-      var back = root.querySelector(".app-head .icon-btn");
+      var back = root.querySelector("[aria-label=\"Назад\"]");
       tg.BackButton.offClick(syncScreen.onBack || function () {});
       if (back) {
         syncScreen.onBack = function () { back.click(); };
@@ -112,10 +153,17 @@
     }
   }
 
+  var keepScroll = false;
+  document.body.addEventListener("htmx:beforeRequest", function (ev) {
+    keepScroll = !!(ev.detail.elt && ev.detail.elt.hasAttribute && ev.detail.elt.hasAttribute("data-keep-scroll"));
+  });
   document.body.addEventListener("htmx:afterSwap", function (ev) {
     if (ev.detail.target.id === "app") {
-      window.scrollTo(0, 0);
+      var y = window.scrollY;
+      window.scrollTo(0, keepScroll ? y : 0);
       syncScreen(ev.detail.target);
+      var f = ev.detail.target.querySelector("[data-autofocus]");
+      if (f && !f.value) f.focus();
     }
   });
 
@@ -139,7 +187,7 @@
 
   // Enter в однострочном поле не отправляет форму — только прячет клавиатуру.
   document.body.addEventListener("keydown", function (ev) {
-    if (ev.key === "Enter" && ev.target.matches("form input:not([type=checkbox]):not([type=radio])")) {
+    if (ev.key === "Enter" && ev.target.matches("form input:not([type=checkbox]):not([type=radio]):not([type=search])")) {
       ev.preventDefault();
       ev.target.blur();
     }
