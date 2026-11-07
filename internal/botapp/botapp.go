@@ -148,7 +148,7 @@ func (a *App) onStart(ctx context.Context, b *bot.Bot, u *models.Update) {
 		return
 	}
 	if t.user.CityID == nil {
-		a.askCity(t, "Привет! Это Uslugi — каталог услуг русскоязычных мастеров.\n\nВ каком ты городе?")
+		a.askCity(t, "Привет! Это Uslugi — каталог мастеров и услуг рядом с тобой.\n\nВ каком ты городе?")
 		return
 	}
 	a.showMenu(t, "")

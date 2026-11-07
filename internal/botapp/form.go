@@ -606,7 +606,7 @@ func (a *App) startFromInvite(t *turn, token string) {
 	if isNotFound(err) {
 		a.log.Info("приглашение не найдено", "token", token)
 		if t.user.CityID == nil {
-			a.askCity(t, "Привет! Это Uslugi — каталог услуг русскоязычных мастеров.\n\nВ каком ты городе?")
+			a.askCity(t, "Привет! Это Uslugi — каталог мастеров и услуг рядом с тобой.\n\nВ каком ты городе?")
 			return
 		}
 		a.showMenu(t, "")

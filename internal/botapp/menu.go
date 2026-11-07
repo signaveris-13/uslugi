@@ -56,7 +56,7 @@ func (a *App) showMenu(t *turn, prefix string) {
 		a.askCity(t, "Сначала выбери город:")
 		return
 	}
-	text := "<b>Uslugi</b> · " + html.EscapeString(a.store.CityName(t.ctx, *t.user.CityID)) + "\nКаталог услуг русскоязычных мастеров."
+	text := "<b>Uslugi</b> · " + html.EscapeString(a.store.CityName(t.ctx, *t.user.CityID)) + "\nМастера и услуги рядом с тобой."
 	if prefix != "" {
 		text = prefix + "\n\n" + text
 	}
