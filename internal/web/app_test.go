@@ -168,13 +168,31 @@ func TestMiniApp(t *testing.T) {
 		"language":            {"ru", "en"},
 		"action":              {"save"},
 	}
+	// Автосохранение: поля сохраняются без перерисовки формы.
+	code, body = a.multipartForm(path, url.Values{
+		"title": {"Черновик из автосохранения"}, "description": {"Пишу описание"},
+		"price_type": {"fixed"}, "language": {"ru"}, "action": {"autosave"},
+	}, nil)
+	if code != http.StatusNoContent || body != "" {
+		t.Fatalf("автосохранение: %d %q", code, body)
+	}
+	if l, _ := e.st.GetListing(ctx, id, 0); l.Title == nil || *l.Title != "Черновик из автосохранения" || l.PriceType == nil || *l.PriceType != "fixed" {
+		t.Fatalf("автосохранение не записало поля: %+v", l)
+	}
+	_, body, _ = a.do(http.MethodGet, path, nil, "")
+	mustContain(t, body, `value="Черновик из автосохранения"`, "Пишу описание")
+
 	bad := url.Values{}
 	for k, v := range fields {
 		bad[k] = v
 	}
 	bad.Set("price_amount", "дорого")
 	_, body = a.multipartForm(path, bad, nil)
-	mustContain(t, body, "Цена: напиши число", "Маникюр с покрытием") // ввод не теряется
+	mustContain(t, body, "Цена: напиши число", "Маникюр с покрытием", `value="дорого"`) // ввод не теряется
+	// Остальные поля сохранены, хотя цена с опечаткой.
+	if l, _ := e.st.GetListing(ctx, id, 0); l.Title == nil || *l.Title != "Маникюр с покрытием" || !l.TravelsToClient {
+		t.Fatalf("поля при опечатке в цене не сохранились: %+v", l)
+	}
 
 	_, body = a.multipartForm(path, fields, nil)
 	mustContain(t, body, "Сохранено.", `value="450 000"`, "Ещё в этой категории")
@@ -452,6 +470,17 @@ func testReviewsAndSupport(t *testing.T, e *env, master, c *appClient, id, clien
 	mustContain(t, body, "Обращение №", "Не открывается WhatsApp", "Ждёт ответа")
 	var ticketID int64
 	e.pool.QueryRow(e.ctx, `SELECT t.id FROM support_ticket t JOIN users u ON u.id = t.user_id WHERE u.telegram_id = $1`, clientID).Scan(&ticketID)
+	// Обращение ушло в Telegram поддержки, кнопка ведёт в админку.
+	if n := e.tg.waitChat(t, 1)[0]; n.Chat != "-1001234567890" ||
+		!strings.Contains(n.Text, fmt.Sprintf("Новое обращение #%d", ticketID)) || !strings.Contains(n.Text, "Не открывается WhatsApp") ||
+		!strings.Contains(n.Text, "Ошибка в приложении") || n.Button != fmt.Sprintf("https://uslugi.test/support/%d", ticketID) {
+		t.Fatalf("уведомление поддержке: %+v", n)
+	}
+	_, body = c.form(fmt.Sprintf("/app/support/%d", ticketID), url.Values{"text": {"Telegram 11.2, Android"}})
+	mustContain(t, body, "Telegram 11.2, Android")
+	if n := e.tg.waitChat(t, 2)[1]; !strings.Contains(n.Text, fmt.Sprintf("Новое сообщение в обращении #%d", ticketID)) || !strings.Contains(n.Text, "Telegram 11.2, Android") {
+		t.Fatalf("второе сообщение поддержке: %+v", n)
+	}
 	_, page, _ = e.do(http.MethodGet, "/support", nil)
 	mustContain(t, page, "Не открывается WhatsApp", "Ждут ответа")
 	code, _, h = e.do(http.MethodPost, fmt.Sprintf("/support/%d/answer", ticketID), url.Values{"text": {"Обновите Telegram — должно заработать."}})

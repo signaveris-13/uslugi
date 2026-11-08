@@ -269,3 +269,12 @@ func (s *Store) UserByID(ctx context.Context, id int64) (User, error) {
 	u, err := collectOne[User](rows)
 	return u, notFound(err)
 }
+
+// TelegramIDByUsername — Telegram ID пользователя бота по username (без @, без учёта регистра).
+// Нужен, чтобы писать аккаунту поддержки: бот может написать только тому, кто уже нажимал /start.
+func (s *Store) TelegramIDByUsername(ctx context.Context, username string) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `SELECT telegram_id FROM users WHERE lower(username::text) = lower($1) ORDER BY id LIMIT 1`,
+		strings.TrimPrefix(username, "@")).Scan(&id)
+	return id, notFound(err)
+}

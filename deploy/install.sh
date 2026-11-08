@@ -54,6 +54,7 @@ BOT_TOKEN=$BOT_TOKEN
 BOT_USERNAME=
 TEAM_TELEGRAM_IDS=$TEAM_IDS
 ADMIN_TIMEZONE=Asia/Ho_Chi_Minh
+SUPPORT_CHAT=@uslugi_support
 EOF
   echo "сохранено в deploy/.env"
 else

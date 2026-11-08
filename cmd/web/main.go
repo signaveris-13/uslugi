@@ -94,6 +94,7 @@ func main() {
 			EnvLabel:     cfg.Label(),
 			SecureCookie: !cfg.IsLocal(),
 			TimeZone:     tz,
+			SupportChat:  cfg.SupportChat,
 		}).Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

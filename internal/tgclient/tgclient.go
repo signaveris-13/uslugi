@@ -4,6 +4,7 @@ package tgclient
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,22 @@ func (c *Client) Notify(ctx context.Context, chatID int64, html, buttonText, but
 			b = models.InlineKeyboardButton{Text: buttonText, WebApp: &models.WebAppInfo{URL: buttonData}}
 		}
 		p.ReplyMarkup = &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{b}}}
+	}
+	_, err := c.b.SendMessage(ctx, p)
+	return err
+}
+
+// NotifyChat пишет в чат по @username канала/группы или числовому ID (строкой).
+// Кнопка — обычная ссылка: Mini App-кнопки работают только в личке с ботом.
+func (c *Client) NotifyChat(ctx context.Context, chat, html, buttonText, buttonURL string) error {
+	var chatID any = chat
+	if id, err := strconv.ParseInt(chat, 10, 64); err == nil {
+		chatID = id
+	}
+	p := &bot.SendMessageParams{ChatID: chatID, Text: html, ParseMode: models.ParseModeHTML,
+		LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: bot.True()}}
+	if buttonText != "" && buttonURL != "" {
+		p.ReplyMarkup = &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{{{Text: buttonText, URL: buttonURL}}}}
 	}
 	_, err := c.b.SendMessage(ctx, p)
 	return err

@@ -35,6 +35,7 @@ type Server struct {
 	envLabel    string // «Stage» или «Local»; у прода пусто
 	secure      bool   // cookie только по HTTPS (всё, кроме локального запуска)
 	tz          *time.Location
+	supportChat string
 }
 
 type Options struct {
@@ -47,6 +48,7 @@ type Options struct {
 	EnvLabel     string
 	SecureCookie bool
 	TimeZone     *time.Location
+	SupportChat  string // куда пересылать обращения в поддержку (см. config.SupportChat)
 }
 
 func New(s *store.Store, log *slog.Logger, opt Options) *Server {
@@ -60,7 +62,8 @@ func New(s *store.Store, log *slog.Logger, opt Options) *Server {
 	}
 	srv := &Server{store: s, log: log, tg: opt.Telegram, media: opt.Media, botToken: opt.BotToken,
 		appSecret: secret[:], devLogin: opt.DevLogin,
-		botUsername: opt.BotUsername, secure: opt.SecureCookie, tz: tz, envLabel: opt.EnvLabel}
+		botUsername: opt.BotUsername, secure: opt.SecureCookie, tz: tz, envLabel: opt.EnvLabel,
+		supportChat: strings.TrimSpace(opt.SupportChat)}
 	if strings.HasPrefix(opt.PublicURL, "https://") {
 		srv.publicURL = strings.TrimSuffix(opt.PublicURL, "/")
 	}

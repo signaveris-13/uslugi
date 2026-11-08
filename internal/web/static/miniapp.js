@@ -206,6 +206,58 @@
     });
   }
 
+  // Автосохранение формы объявления: всё, что введено, сохраняется само —
+  // через секунду после ввода и сразу, когда приложение сворачивают или закрывают.
+  // Сервер отвечает 204 и ничего не перерисовывает, курсор остаётся на месте.
+  var autosaveTimer = null;
+  var autosaving = Promise.resolve();
+  var editorRequests = 0;
+
+  function autosave(keepalive) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+    var form = document.getElementById("editor");
+    if (!form || !token) return;
+    if (editorRequests > 0 && !keepalive) { scheduleAutosave(); return; }
+    var fd = new FormData(form);
+    fd.delete("photos");
+    fd.set("action", "autosave");
+    autosaving = fetch(form.getAttribute("hx-post"), {
+      method: "POST", body: fd, headers: { "X-App-Token": token }, keepalive: !!keepalive
+    }).catch(function () {});
+  }
+
+  function scheduleAutosave() {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(autosave, 1000);
+  }
+
+  function inEditor(t) {
+    return t && t.closest && t.closest("#editor") && !t.matches("input[type=file]");
+  }
+
+  document.body.addEventListener("input", function (ev) {
+    if (inEditor(ev.target)) scheduleAutosave();
+  });
+  document.body.addEventListener("htmx:beforeRequest", function (ev) {
+    if (ev.detail.elt && ev.detail.elt.closest && ev.detail.elt.closest("#editor")) {
+      editorRequests++;
+      if (ev.detail.xhr) ev.detail.xhr.uslugiEditor = true;
+      clearTimeout(autosaveTimer); // запрос формы и так сохраняет все поля
+      autosaveTimer = null;
+    }
+  });
+  document.body.addEventListener("htmx:afterRequest", function (ev) {
+    if (ev.detail.xhr && ev.detail.xhr.uslugiEditor && editorRequests > 0) editorRequests--;
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden" && autosaveTimer) autosave(true);
+  });
+  window.addEventListener("pagehide", function () { if (autosaveTimer) autosave(true); });
+  if (tg && tg.onEvent) {
+    try { tg.onEvent("viewportChanged", function () { if (autosaveTimer) autosave(true); }); } catch (e) {}
+  }
+
   // Заменяет файлы в поле на пережатые. Если браузер не умеет — уходят исходные.
   function prepareImages(input) {
     if (!window.DataTransfer || !window.File || !HTMLCanvasElement.prototype.toBlob) return Promise.resolve();
@@ -225,12 +277,14 @@
     if (t.matches("input[type=file][data-autoupload]") && t.files.length) {
       var label = t.closest(".photo-add");
       if (label) label.classList.add("is-busy");
-      prepareImages(t).then(function () {
+      Promise.all([prepareImages(t), autosaving]).then(function () {
         if (t.form.requestSubmit) t.form.requestSubmit();
         else htmx.trigger(t.form, "submit");
       });
       return;
     }
+    // Галочки, переключатели и списки сохраняем так же, как текст (категория сохраняется сама).
+    if (inEditor(t) && t.name !== "primary_category_id") scheduleAutosave();
     // Ограничение на число отмеченных чипов (дополнительные подкатегории).
     var box = t.closest("[data-max]");
     if (box && t.checked) {

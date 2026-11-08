@@ -299,6 +299,12 @@ func (s *Server) renderEditor(w http.ResponseWriter, r *http.Request, u store.Us
 	if a := st.Snapshot.PriceAmount; a != nil {
 		d.PriceInput = store.AmountInput(*a)
 	}
+	// Сумму не поняли — показываем то, что человек ввёл, чтобы он поправил, а не набирал заново.
+	if raw := strings.TrimSpace(r.FormValue("price_amount")); errText != "" && raw != "" && r.Method == http.MethodPost {
+		if _, ok := store.ParseAmount(raw); !ok {
+			d.PriceInput = raw
+		}
+	}
 	if p.TermsAcceptedAt == nil && st.Mode == store.EditDirect {
 		d.TermsNeeded = true
 		d.TermsText = s.store.BotText(ctx, "terms", "Правила площадки: Uslugi — площадка, а не сторона сделки.")
@@ -343,6 +349,8 @@ func snapshotFromForm(r *http.Request, cur store.Snapshot, username string) (sto
 			if v, ok := store.ParseAmount(raw); ok {
 				sn.PriceAmount = &v
 			} else {
+				// Остальные поля всё равно сохраняем, а сумму оставляем прежней.
+				sn.PriceAmount = cur.PriceAmount
 				problem = "Цена: напиши число, например 450 000 или 450к."
 			}
 		}
@@ -394,23 +402,47 @@ func (s *Server) appEditorPost(w http.ResponseWriter, r *http.Request, u store.U
 		sn.ExtraCategoryIDs = nil
 		problem = ""
 	}
-	if problem != "" {
-		s.renderEditor(w, r, u, p, id, &sn, problem, "")
+	// Автосохранение не трогает правку опубликованного объявления:
+	// иначе недописанная правка сама ушла бы на модерацию.
+	if action == "autosave" && st.Mode != store.EditDirect {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	// Отмеченные правила запоминаем сразу, а не только при отправке.
+	if r.FormValue("terms") == "1" && p.TermsAcceptedAt == nil && st.Mode == store.EditDirect {
+		if err := s.store.AcceptTerms(ctx, p.ID); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		now := time.Now()
+		p.TermsAcceptedAt = &now
+	}
+	// Сохраняем всё, что введено, даже если в цене опечатка: ничего не теряется.
 	if _, err := s.store.SaveEditor(ctx, id, p.ID, sn); err != nil {
 		var ve store.ValidationError
 		if errors.As(err, &ve) {
+			if action == "autosave" {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			s.renderEditor(w, r, u, p, id, &sn, ve.Msg, "")
 			return
 		}
 		s.fail(w, r, err)
 		return
 	}
+	if action == "autosave" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if problem != "" && action != "upload" {
+		s.renderEditor(w, r, u, p, id, &sn, problem, "")
+		return
+	}
 
 	switch {
 	case action == "upload":
-		s.appUpload(w, r, u, p, id)
+		s.appUpload(w, r, u, p, id, problem)
 		return
 	case strings.HasPrefix(action, "delphoto:"):
 		n, _ := strconv.Atoi(strings.TrimPrefix(action, "delphoto:"))
@@ -434,7 +466,9 @@ func (s *Server) appEditorPost(w http.ResponseWriter, r *http.Request, u store.U
 	s.renderEditor(w, r, u, p, id, nil, "", notice)
 }
 
-func (s *Server) appUpload(w http.ResponseWriter, r *http.Request, u store.User, p store.Provider, id int64) {
+// appUpload добавляет фото. warn — замечание к остальной форме (например, опечатка в цене):
+// фото всё равно добавляем, а замечание показываем.
+func (s *Server) appUpload(w http.ResponseWriter, r *http.Request, u store.User, p store.Provider, id int64, warn string) {
 	if s.media == nil {
 		s.renderEditor(w, r, u, p, id, nil, "Загрузка фото сейчас недоступна. Фото можно прислать боту.", "")
 		return
@@ -474,7 +508,7 @@ func (s *Server) appUpload(w http.ResponseWriter, r *http.Request, u store.User,
 		}
 		added++
 	}
-	s.renderEditor(w, r, u, p, id, nil, "", "Фото добавлено: "+strconv.Itoa(added)+".")
+	s.renderEditor(w, r, u, p, id, nil, warn, "Фото добавлено: "+strconv.Itoa(added)+".")
 }
 
 func (s *Server) appSubmit(w http.ResponseWriter, r *http.Request, u store.User, p store.Provider, id int64, before store.EditorState) {

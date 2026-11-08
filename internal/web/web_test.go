@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -28,9 +29,38 @@ type sentNotice struct {
 }
 
 type fakeTelegram struct {
-	mu      sync.Mutex
-	sent    []sentNotice
-	fileURL string
+	mu       sync.Mutex
+	sent     []sentNotice
+	chatSent []chatNotice
+	fileURL  string
+}
+
+type chatNotice struct {
+	Chat, Text, Button string
+}
+
+func (f *fakeTelegram) NotifyChat(_ context.Context, chat, html, _, buttonURL string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.chatSent = append(f.chatSent, chatNotice{chat, html, buttonURL})
+	return nil
+}
+
+// waitChat ждёт n сообщений в чат поддержки: они уходят в фоне.
+func (f *fakeTelegram) waitChat(t *testing.T, n int) []chatNotice {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		f.mu.Lock()
+		if len(f.chatSent) >= n {
+			out := append([]chatNotice(nil), f.chatSent...)
+			f.mu.Unlock()
+			return out
+		}
+		f.mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("в чат поддержки не пришло %d сообщений", n)
+	return nil
 }
 
 func (f *fakeTelegram) Notify(_ context.Context, chatID int64, html, _, _ string) error {
@@ -86,6 +116,7 @@ func newEnv(t *testing.T) *env {
 	}
 	srv := httptest.NewServer(New(st, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{
 		Telegram: tg, BotUsername: "test_bot", Media: ms, BotToken: testBotToken,
+		PublicURL: "https://uslugi.test", SupportChat: "-1001234567890",
 	}).Routes())
 
 	// Участник команды и сессия — как после входа через бота.

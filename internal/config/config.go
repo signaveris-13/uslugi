@@ -30,6 +30,9 @@ type Config struct {
 	PublicURL string
 	// MediaDir — папка для фото, загруженных через Mini App. Общая у web и bot.
 	MediaDir string
+	// SupportChat — куда бот пересылает обращения в поддержку: @username аккаунта
+	// поддержки (он должен один раз нажать /start в боте), @канал или числовой chat ID.
+	SupportChat string
 }
 
 func Load() (Config, error) {
@@ -43,6 +46,7 @@ func Load() (Config, error) {
 		AdminTimezone: getenv("ADMIN_TIMEZONE", "Asia/Ho_Chi_Minh"),
 		PublicURL:     strings.TrimSuffix(os.Getenv("PUBLIC_URL"), "/"),
 		MediaDir:      getenv("MEDIA_DIR", "media"),
+		SupportChat:   strings.TrimSpace(os.Getenv("SUPPORT_CHAT")),
 	}
 
 	ids, err := parseIDs(os.Getenv("TEAM_TELEGRAM_IDS"))

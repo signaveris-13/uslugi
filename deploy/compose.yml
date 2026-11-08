@@ -18,13 +18,27 @@ x-app: &app
     # Mini App открывается по https; фото из него лежат в общем томе web и bot.
     PUBLIC_URL: https://${DOMAIN}
     MEDIA_DIR: /data/media
+    # Куда пересылать обращения в поддержку: @username (нажал /start в боте), @канал или chat ID.
+    SUPPORT_CHAT: ${SUPPORT_CHAT:-}
   volumes:
     - media:/data/media
   depends_on:
     migrate:
       condition: service_completed_successfully
+    media-init:
+      condition: service_completed_successfully
 
 services:
+  # Том с фото должен принадлежать пользователю app (uid 10001) из образа.
+  # Если том первым создал другой контейнер (backup), он принадлежит root, и загрузка
+  # фото падает с «permission denied». Поэтому владельца выставляем при каждом запуске.
+  media-init:
+    image: alpine:3.20
+    restart: "no"
+    volumes:
+      - media:/data/media
+    command: ["chown", "-R", "10001:10001", "/data/media"]
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped

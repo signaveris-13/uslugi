@@ -198,6 +198,7 @@ func (s *Server) appSupportPost(w http.ResponseWriter, r *http.Request, u store.
 		return
 	}
 	_ = s.store.LogEvent(r.Context(), "support_ticket", u.ID, "support_ticket", id, "miniapp", map[string]any{"topic": topic})
+	s.notifySupport(id, text, true)
 	s.renderThread(w, r, u, id, "")
 }
 
@@ -221,7 +222,8 @@ func (s *Server) renderThread(w http.ResponseWriter, r *http.Request, u store.Us
 
 func (s *Server) appThreadPost(w http.ResponseWriter, r *http.Request, u store.User) {
 	id := s.ticketID(r)
-	err := s.store.AddUserMessage(r.Context(), id, u.ID, r.FormValue("text"))
+	text := r.FormValue("text")
+	err := s.store.AddUserMessage(r.Context(), id, u.ID, text)
 	var ve store.ValidationError
 	switch {
 	case errors.As(err, &ve):
@@ -229,6 +231,7 @@ func (s *Server) appThreadPost(w http.ResponseWriter, r *http.Request, u store.U
 	case err != nil:
 		s.fail(w, r, err)
 	default:
+		s.notifySupport(id, text, false)
 		s.renderThread(w, r, u, id, "")
 	}
 }

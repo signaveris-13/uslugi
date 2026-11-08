@@ -19,6 +19,7 @@ import (
 // Telegram — что веб-серверу нужно от бота. nil — Telegram не настроен (локально без токена).
 type Telegram interface {
 	Notify(ctx context.Context, chatID int64, html, buttonText, buttonData string) error
+	NotifyChat(ctx context.Context, chat, html, buttonText, buttonURL string) error
 	FileURL(ctx context.Context, fileID string) (string, error)
 }
 
