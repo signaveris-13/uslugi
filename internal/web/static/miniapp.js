@@ -169,11 +169,66 @@
     }
   });
 
+  // Фото с Mac и телефонов приходят в HEIC, WebP или огромными PNG, а сервер
+  // принимает JPEG и PNG до 15 МБ. Пережимаем в JPEG до 1600 px по длинной стороне:
+  // браузер Telegram сам читает эти форматы и поворачивает снимок по EXIF.
+  var PHOTO_MAX_SIDE = 1600;
+
+  function toJpeg(file) {
+    return new Promise(function (resolve) {
+      if (!file.type || file.type.indexOf("image/") !== 0) { resolve(file); return; }
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var w = img.naturalWidth, h = img.naturalHeight;
+          var k = Math.min(1, PHOTO_MAX_SIDE / Math.max(w, h));
+          var c = document.createElement("canvas");
+          c.width = Math.max(1, Math.round(w * k));
+          c.height = Math.max(1, Math.round(h * k));
+          var ctx = c.getContext("2d");
+          ctx.fillStyle = "#FFFFFF"; // прозрачный PNG — на белом фоне
+          ctx.fillRect(0, 0, c.width, c.height);
+          ctx.drawImage(img, 0, 0, c.width, c.height);
+          URL.revokeObjectURL(url);
+          c.toBlob(function (b) {
+            if (!b) { resolve(file); return; }
+            var name = (file.name || "photo").replace(/\.[^.]*$/, "") + ".jpg";
+            resolve(new File([b], name, { type: "image/jpeg" }));
+          }, "image/jpeg", 0.85);
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          resolve(file);
+        }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  // Заменяет файлы в поле на пережатые. Если браузер не умеет — уходят исходные.
+  function prepareImages(input) {
+    if (!window.DataTransfer || !window.File || !HTMLCanvasElement.prototype.toBlob) return Promise.resolve();
+    var files = Array.prototype.slice.call(input.files);
+    return Promise.all(files.map(toJpeg)).then(function (out) {
+      try {
+        var dt = new DataTransfer();
+        out.forEach(function (f) { dt.items.add(f); });
+        input.files = dt.files;
+      } catch (e) {}
+    }, function () {});
+  }
+
   document.body.addEventListener("change", function (ev) {
     var t = ev.target;
-    // Фото загружаем сразу после выбора.
+    // Фото загружаем сразу после выбора: сначала пережимаем в JPEG прямо на устройстве.
     if (t.matches("input[type=file][data-autoupload]") && t.files.length) {
-      t.form.requestSubmit();
+      var label = t.closest(".photo-add");
+      if (label) label.classList.add("is-busy");
+      prepareImages(t).then(function () {
+        if (t.form.requestSubmit) t.form.requestSubmit();
+        else htmx.trigger(t.form, "submit");
+      });
       return;
     }
     // Ограничение на число отмеченных чипов (дополнительные подкатегории).

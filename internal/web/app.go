@@ -371,6 +371,7 @@ func (s *Server) appEditorPost(w http.ResponseWriter, r *http.Request, u store.U
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, (store.MaxPhotos+1)*media.MaxUploadBytes)
 	if err := r.ParseMultipartForm(8 << 20); err != nil && !errors.Is(err, http.ErrNotMultipart) {
+		s.log.Warn("фото: не удалось разобрать форму", "err", err, "size", r.ContentLength)
 		s.renderEditor(w, r, u, p, id, nil, "Файл слишком большой — до 15 МБ на фото.", "")
 		return
 	}
@@ -442,6 +443,7 @@ func (s *Server) appUpload(w http.ResponseWriter, r *http.Request, u store.User,
 	added := 0
 	for _, fh := range files {
 		if fh.Size > media.MaxUploadBytes {
+			s.log.Warn("фото: слишком большое", "type", fh.Header.Get("Content-Type"), "size", fh.Size)
 			s.renderEditor(w, r, u, p, id, nil, "Фото «"+fh.Filename+"» больше 15 МБ.", "")
 			return
 		}
@@ -453,7 +455,8 @@ func (s *Server) appUpload(w http.ResponseWriter, r *http.Request, u store.User,
 		key, err := s.media.Save(f)
 		f.Close()
 		if errors.Is(err, media.ErrUnsupported) {
-			s.renderEditor(w, r, u, p, id, nil, "Подходят фото JPEG и PNG.", "")
+			s.log.Warn("фото: формат не поддерживается", "type", fh.Header.Get("Content-Type"), "name", fh.Filename, "size", fh.Size)
+			s.renderEditor(w, r, u, p, id, nil, "Не получилось прочитать фото. Подходят JPEG и PNG — попробуй другое фото.", "")
 			return
 		}
 		if err != nil {
